@@ -1,0 +1,43 @@
+{
+  "name": "@byterover/openclaw-plugin",
+  "version": "0.1.0",
+  "description": "ByteRover context engine plugin for OpenClaw — curates and queries conversation context via brv CLI",
+  "type": "module",
+  "main": "index.ts",
+  "license": "MIT",
+  "author": "ByteRover",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "byterover",
+    "context-engine"
+  ],
+  "scripts": {
+    "test": "vitest run --dir test",
+    "typecheck": "tsc --noEmit"
+  },
+  "files": [
+    "index.ts",
+    "src/**/*.ts",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "peerDependencies": {
+    "openclaw": "*"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
