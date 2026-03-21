@@ -1,15 +1,3 @@
-/**
- * ByteRoverContextEngine — OpenClaw ContextEngine implementation.
- *
- * Retrieval-augmented context engine:
- *   assemble → brv query → systemPromptAddition
- *
- * Lifecycle mapping:
- *   assemble   → brv query    Retrieve curated knowledge, inject as system prompt.
- *   ingest     → no-op        Not used by this engine.
- *   compact    → delegates    ownsCompaction=false; runtime handles compaction.
- */
-
 import type {
   ContextEngine,
   ContextEngineInfo,
@@ -18,9 +6,18 @@ import type {
   IngestResult,
   PluginLogger,
 } from "./types.js";
-import { brvQuery, type BrvProcessConfig } from "./brv-process.js";
-import { stripUserMetadata } from "./message-utils.js";
+import { brvCurate, brvQuery, type BrvProcessConfig } from "./brv-process.js";
+import { stripUserMetadata, extractSenderInfo, stripAssistantTags } from "./message-utils.js";
 
+/**
+ * ByteRoverContextEngine integrates the brv CLI as an OpenClaw context engine.
+ *
+ * Lifecycle mapping:
+ *   - afterTurn  → `brv curate` (feed conversation turns for curation)
+ *   - assemble   → `brv query`  (retrieve curated knowledge as system prompt addition)
+ *   - ingest     → no-op (afterTurn handles batch ingestion)
+ *   - compact    → not owned (runtime handles compaction via legacy path)
+ */
 export class ByteRoverContextEngine implements ContextEngine {
   readonly info: ContextEngineInfo = {
     id: "byterover",
@@ -38,12 +35,11 @@ export class ByteRoverContextEngine implements ContextEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // ingest — no-op
+  // ingest — no-op (afterTurn handles it)
   // ---------------------------------------------------------------------------
 
   async ingest(_params: {
     sessionId: string;
-    sessionKey?: string;
     message: unknown;
     isHeartbeat?: boolean;
   }): Promise<IngestResult> {
@@ -51,7 +47,65 @@ export class ByteRoverContextEngine implements ContextEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // assemble — query brv for curated knowledge, inject as system prompt
+  // afterTurn — feed the completed turn to brv curate
+  // ---------------------------------------------------------------------------
+
+  async afterTurn(params: {
+    sessionId: string;
+    sessionFile: string;
+    messages: unknown[];
+    prePromptMessageCount: number;
+    isHeartbeat?: boolean;
+  }): Promise<void> {
+    if (params.isHeartbeat) {
+      this.logger.debug?.("afterTurn skipped (heartbeat)");
+      return;
+    }
+
+    // Extract only the new messages from this turn
+    const newMessages = params.messages.slice(params.prePromptMessageCount);
+    if (newMessages.length === 0) {
+      this.logger.debug?.("afterTurn skipped (no new messages)");
+      return;
+    }
+
+    // Serialize messages into a text block for brv curate
+    const serialized = serializeMessagesForCurate(newMessages);
+    if (!serialized.trim()) {
+      this.logger.debug?.("afterTurn skipped (empty serialized context)");
+      return;
+    }
+
+    const context =
+      `The following is a conversation between a user and an AI assistant (OpenClaw).\n` +
+      `Curate only information with lasting value: facts, decisions, technical details, preferences, or notable outcomes.\n` +
+      `Skip trivial messages such as greetings, acknowledgments ("ok", "thanks", "sure", "got it"), one-word replies, anything with no substantive content, or automated session-start messages (e.g. "/new", "/reset" and their system-generated continuations).\n\n` +
+      `Conversation:\n${serialized}`;
+
+    this.logger.info(
+      `afterTurn curating ${newMessages.length} new messages (${context.length} chars)`,
+    );
+    try {
+      const result = await brvCurate({
+        config: this.config,
+        logger: this.logger,
+        context,
+        // --detach tells the brv daemon to queue curation work asynchronously.
+        // The CLI process itself exits immediately (~ms) after the daemon acknowledges
+        // the request, so the await here only waits for that quick handshake — not for
+        // the actual curation to complete. We still await to capture the JSON response
+        // (queued status, task ID) and to surface ENOENT / crash errors.
+        detach: true,
+      });
+      this.logger.debug?.(`afterTurn curate result: ${JSON.stringify(result.data?.status)}`);
+    } catch (err) {
+      // Best-effort: don't fail the turn if curation fails
+      this.logger.warn(`curate failed (best-effort): ${String(err)}`);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // assemble — query brv for curated knowledge and inject as system prompt
   // ---------------------------------------------------------------------------
 
   async assemble(params: {
@@ -60,34 +114,33 @@ export class ByteRoverContextEngine implements ContextEngine {
     tokenBudget?: number;
     prompt?: string;
   }): Promise<AssembleResult> {
-    const passthrough: AssembleResult = {
-      messages: params.messages,
-      estimatedTokens: 0,
-    };
-
-    // Use the incoming prompt (upstream field from openclaw#43920) — this is
-    // the actual user message for this turn. Fall back to scanning the message
-    // history for older runtimes that don't pass prompt yet.
+    // Use the incoming prompt (new upstream field) — this is the actual user
+    // message for this turn. Fall back to history scan for older runtimes.
     const rawPrompt = params.prompt ?? null;
     const query = rawPrompt
       ? stripUserMetadata(rawPrompt).trim() || null
       : extractLatestUserQuery(params.messages);
-
     if (!query) {
       this.logger.debug?.("assemble skipped brv query (no user message found)");
-      return passthrough;
+      return {
+        messages: params.messages as AssembleResult["messages"],
+        estimatedTokens: 0,
+      };
     }
 
-    // Skip trivially short queries (e.g. "ok", "hi", "yes") — not worth a
-    // brv spawn. Applied after metadata stripping so inflated raw prompts
-    // don't bypass this gate.
+    // Skip trivially short queries (e.g. "ok", "hi", "yes") — not worth a brv spawn.
+    // Applied after metadata stripping so inflated raw prompts don't bypass this.
     if (query.length < 5) {
       this.logger.debug?.(`assemble skipped brv query (query too short: "${query}")`);
-      return passthrough;
+      return {
+        messages: params.messages as AssembleResult["messages"],
+        estimatedTokens: 0,
+      };
     }
 
-    // Abort-based deadline: default 10s, capped to stay within the agent
-    // ready timeout (15s). Signal propagates to runBrv → child process kill.
+    // Abort-based deadline so we never exceed the agent ready timeout (15s).
+    // Default 10s — leaves headroom for the runtime's own overhead.
+    // The signal is passed to brvQuery → runBrv, which kills the child process on abort.
     const assembleTimeout = this.config.queryTimeoutMs
       ? Math.min(this.config.queryTimeoutMs, 10_000)
       : 10_000;
@@ -95,11 +148,9 @@ export class ByteRoverContextEngine implements ContextEngine {
     this.logger.debug?.(
       `assemble querying brv: "${query.slice(0, 100)}${query.length > 100 ? "..." : ""}" (timeout=${assembleTimeout}ms)`,
     );
-
     let systemPromptAddition: string | undefined;
     const ac = new AbortController();
     const deadline = setTimeout(() => ac.abort(), assembleTimeout);
-
     try {
       const result = await brvQuery({
         config: this.config,
@@ -122,6 +173,7 @@ export class ByteRoverContextEngine implements ContextEngine {
         this.logger.debug?.("assemble brv query returned empty result");
       }
     } catch (err) {
+      // Don't fail the prompt if brv query fails or times out
       const msg = String(err);
       if (msg.includes("aborted")) {
         this.logger.warn(
@@ -135,14 +187,14 @@ export class ByteRoverContextEngine implements ContextEngine {
     }
 
     return {
-      messages: params.messages,
-      estimatedTokens: 0,
+      messages: params.messages as AssembleResult["messages"],
+      estimatedTokens: 0, // Caller handles estimation
       systemPromptAddition,
     };
   }
 
   // ---------------------------------------------------------------------------
-  // compact — not owned; delegate to runtime
+  // compact — we don't own compaction; return not-compacted
   // ---------------------------------------------------------------------------
 
   async compact(_params: {
@@ -159,7 +211,7 @@ export class ByteRoverContextEngine implements ContextEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // dispose
+  // dispose — no persistent resources to clean up
   // ---------------------------------------------------------------------------
 
   async dispose(): Promise<void> {
@@ -168,8 +220,48 @@ export class ByteRoverContextEngine implements ContextEngine {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers (exported for testing)
+// Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Serialize agent messages into a human-readable text block for brv curate.
+ *
+ * - User messages: strip metadata noise, attribute with sender name + timestamp
+ * - Assistant messages: strip <final>/<think> tags
+ * - toolResult messages: skipped (internal implementation details)
+ */
+export function serializeMessagesForCurate(messages: unknown[]): string {
+  const lines: string[] = [];
+  for (const msg of messages) {
+    const m = msg as { role?: string; content?: unknown };
+    if (!m.role) continue;
+
+    // Skip tool results — internal details, not useful for curation
+    if (m.role === "toolResult") continue;
+
+    let text = extractTextContent(m.content);
+    if (!text.trim()) continue;
+
+    if (m.role === "user") {
+      // Extract sender info before stripping metadata
+      const sender = extractSenderInfo(text);
+      text = stripUserMetadata(text);
+      if (!text.trim()) continue;
+
+      // Build clean attribution header
+      const parts = [sender?.name, sender?.timestamp].filter(Boolean);
+      const label = parts.length > 0 ? parts.join(" @ ") : "user";
+      lines.push(`[${label}]: ${text.trim()}`);
+    } else if (m.role === "assistant") {
+      text = stripAssistantTags(text);
+      if (!text.trim()) continue;
+      lines.push(`[assistant]: ${text.trim()}`);
+    } else {
+      lines.push(`[${m.role}]: ${text.trim()}`);
+    }
+  }
+  return lines.join("\n\n");
+}
 
 /** Extract text from string content or ContentBlock[] arrays. */
 export function extractTextContent(content: unknown): string {
@@ -186,7 +278,7 @@ export function extractTextContent(content: unknown): string {
 }
 
 /**
- * Extract the latest user message text from a message array.
+ * Extract the latest user message text to use as the brv query.
  * Strips OpenClaw metadata so brv receives only the actual question.
  */
 export function extractLatestUserQuery(messages: unknown[]): string | null {
