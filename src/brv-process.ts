@@ -1,8 +1,3 @@
-/**
- * brv CLI process wrapper — spawns `brv curate` and `brv query` as child
- * processes, parses NDJSON responses, and enforces timeouts + output caps.
- */
-
 import { spawn } from "node:child_process";
 import type { PluginLogger } from "./types.js";
 
@@ -60,15 +55,6 @@ export type BrvProcessConfig = {
 // Core spawning utility
 // ---------------------------------------------------------------------------
 
-/**
- * Spawn a brv child process and capture stdout/stderr.
- *
- * Safety measures:
- *   - Timeout kills the child with SIGKILL after `timeoutMs`
- *   - AbortSignal propagation kills the child on external cancellation
- *   - Output cap (default 512KB) kills the child if stdout exceeds limit
- *   - Settled guard prevents double resolve/reject from competing handlers
- */
 function runBrv(params: {
   brvPath: string;
   args: string[];
@@ -112,10 +98,15 @@ function runBrv(params: {
 
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      settle("reject", new Error(`brv ${params.args[0]} timed out after ${params.timeoutMs}ms`));
+      settle(
+        "reject",
+        new Error(
+          `brv ${params.args[0]} timed out after ${params.timeoutMs}ms`,
+        ),
+      );
     }, params.timeoutMs);
 
-    // External cancellation via AbortSignal (used by assemble deadline).
+    // External cancellation via AbortSignal (used by assemble deadline)
     if (params.signal) {
       if (params.signal.aborted) {
         child.kill("SIGKILL");
@@ -136,15 +127,15 @@ function runBrv(params: {
       stdout += chunk.toString("utf8");
       if (stdout.length > maxOutput) {
         child.kill("SIGKILL");
-        settle("reject", new Error(`brv ${params.args[0]} output exceeded ${maxOutput} chars`));
+        settle(
+          "reject",
+          new Error(`brv ${params.args[0]} output exceeded ${maxOutput} chars`),
+        );
       }
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
-      if (stderr.length > maxOutput) {
-        stderr = stderr.slice(0, maxOutput) + "\n[stderr truncated]";
-      }
     });
 
     child.on("error", (err) => {
@@ -177,19 +168,17 @@ function runBrv(params: {
   });
 }
 
-// ---------------------------------------------------------------------------
-// NDJSON parser
-// ---------------------------------------------------------------------------
-
 /**
  * Parse the last complete JSON object from brv's newline-delimited JSON output.
- * brv streams events as NDJSON; the final line is the result we care about.
+ * brv streams events as NDJSON; the final line with `status: "completed"` is the result.
  */
 export function parseLastJsonLine<T>(stdout: string): BrvJsonResponse<T> {
   const lines = stdout.trim().split("\n").filter(Boolean);
+  // Walk backwards to find the final completed result
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
-      return JSON.parse(lines[i]) as BrvJsonResponse<T>;
+      const parsed = JSON.parse(lines[i]) as BrvJsonResponse<T>;
+      return parsed;
     } catch {
       // Skip non-JSON lines (shouldn't happen with --format json, but be safe)
     }
@@ -225,10 +214,16 @@ export async function brvCurate(params: {
       args.push("-f", f);
     }
   }
-  // POSIX "--" terminates flags so user text starting with "-" isn't parsed as a brv option
+  // "--" terminates flags so user text starting with "-" isn't parsed as a brv option
   args.push("--", params.context);
 
-  const { stdout } = await runBrv({ brvPath, args, cwd, timeoutMs, logger: params.logger });
+  const { stdout } = await runBrv({
+    brvPath,
+    args,
+    cwd,
+    timeoutMs,
+    logger: params.logger,
+  });
   return parseLastJsonLine<BrvCurateResult>(stdout);
 }
 
@@ -245,7 +240,7 @@ export async function brvQuery(params: {
   const cwd = params.config.cwd ?? process.cwd();
   const timeoutMs = params.config.queryTimeoutMs ?? 12_000;
 
-  // POSIX "--" terminates flags so user text starting with "-" isn't parsed as a brv option
+  // "--" terminates flags so user text starting with "-" isn't parsed as a brv option
   const args = ["query", "--format", "json", "--", params.query];
 
   const { stdout } = await runBrv({
