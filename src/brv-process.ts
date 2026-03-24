@@ -200,9 +200,10 @@ export async function brvCurate(params: {
   context: string;
   files?: string[];
   detach?: boolean;
+  cwd: string;
 }): Promise<BrvJsonResponse<BrvCurateResult>> {
   const brvPath = params.config.brvPath ?? "brv";
-  const cwd = params.config.cwd ?? process.cwd();
+  const cwd = params.cwd;
   const timeoutMs = params.config.curateTimeoutMs ?? 60_000;
 
   const args = ["curate", "--format", "json"];
@@ -235,9 +236,10 @@ export async function brvQuery(params: {
   logger: PluginLogger;
   query: string;
   signal?: AbortSignal;
+  cwd: string;
 }): Promise<BrvJsonResponse<BrvQueryResult>> {
   const brvPath = params.config.brvPath ?? "brv";
-  const cwd = params.config.cwd ?? process.cwd();
+  const cwd = params.cwd;
   const timeoutMs = params.config.queryTimeoutMs ?? 12_000;
 
   // "--" terminates flags so user text starting with "-" isn't parsed as a brv option

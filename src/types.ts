@@ -106,6 +106,7 @@ export interface ContextEngine {
 
   assemble(params: {
     sessionId: string;
+    sessionKey?: string;
     messages: unknown[];
     tokenBudget?: number;
     prompt?: string;

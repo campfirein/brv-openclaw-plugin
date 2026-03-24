@@ -7,7 +7,7 @@ import type {
   PluginLogger,
 } from "./types.js";
 import { brvCurate, brvQuery, type BrvProcessConfig } from "./brv-process.js";
-import { stripUserMetadata, extractSenderInfo, stripAssistantTags } from "./message-utils.js";
+import { stripUserMetadata, extractSenderInfo, stripAssistantTags, resolveWorkspaceDir } from "./message-utils.js";
 
 /**
  * ByteRoverContextEngine integrates the brv CLI as an OpenClaw context engine.
@@ -52,6 +52,7 @@ export class ByteRoverContextEngine implements ContextEngine {
 
   async afterTurn(params: {
     sessionId: string;
+    sessionKey?: string;
     sessionFile: string;
     messages: unknown[];
     prePromptMessageCount: number;
@@ -82,14 +83,16 @@ export class ByteRoverContextEngine implements ContextEngine {
       `Skip trivial messages such as greetings, acknowledgments ("ok", "thanks", "sure", "got it"), one-word replies, anything with no substantive content, or automated session-start messages (e.g. "/new", "/reset" and their system-generated continuations).\n\n` +
       `Conversation:\n${serialized}`;
 
+    const cwd = resolveWorkspaceDir(params.sessionKey, this.config.cwd) ?? process.cwd();
     this.logger.info(
-      `afterTurn curating ${newMessages.length} new messages (${context.length} chars)`,
+      `afterTurn curating ${newMessages.length} new messages (${context.length} chars, cwd=${cwd})`,
     );
     try {
       const result = await brvCurate({
         config: this.config,
         logger: this.logger,
         context,
+        cwd,
         // --detach tells the brv daemon to queue curation work asynchronously.
         // The CLI process itself exits immediately (~ms) after the daemon acknowledges
         // the request, so the await here only waits for that quick handshake — not for
@@ -110,6 +113,7 @@ export class ByteRoverContextEngine implements ContextEngine {
 
   async assemble(params: {
     sessionId: string;
+    sessionKey?: string;
     messages: unknown[];
     tokenBudget?: number;
     prompt?: string;
@@ -145,8 +149,9 @@ export class ByteRoverContextEngine implements ContextEngine {
       ? Math.min(this.config.queryTimeoutMs, 10_000)
       : 10_000;
 
+    const cwd = resolveWorkspaceDir(params.sessionKey, this.config.cwd) ?? process.cwd();
     this.logger.debug?.(
-      `assemble querying brv: "${query.slice(0, 100)}${query.length > 100 ? "..." : ""}" (timeout=${assembleTimeout}ms)`,
+      `assemble querying brv: "${query.slice(0, 100)}${query.length > 100 ? "..." : ""}" (timeout=${assembleTimeout}ms, cwd=${cwd})`,
     );
     let systemPromptAddition: string | undefined;
     const ac = new AbortController();
@@ -157,6 +162,7 @@ export class ByteRoverContextEngine implements ContextEngine {
         logger: this.logger,
         query,
         signal: ac.signal,
+        cwd,
       });
 
       const answer = result.data?.result ?? result.data?.content;

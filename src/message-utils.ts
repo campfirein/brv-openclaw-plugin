@@ -190,3 +190,27 @@ export function stripAssistantTags(text: string): string {
   if (!text) return text;
   return text.replace(AGENT_TAG_RE, "");
 }
+
+// ---------------------------------------------------------------------------
+// sessionKey utilities
+// ---------------------------------------------------------------------------
+
+/** Extract agent ID from sessionKey format: "agent:<agentId>:<channel>:..." */
+export function extractAgentId(sessionKey?: string): string | undefined {
+  if (!sessionKey) return undefined;
+  const parts = sessionKey.split(":");
+  return parts.length >= 2 && parts[0] === "agent" ? parts[1] : undefined;
+}
+
+/**
+ * Resolve workspace directory from sessionKey.
+ * Convention: "main" agent uses baseCwd as-is, others use baseCwd-<agentId>.
+ * Default baseCwd: ~/.openclaw/workspace
+ */
+export function resolveWorkspaceDir(sessionKey?: string, baseCwd?: string): string | undefined {
+  const agentId = extractAgentId(sessionKey);
+  if (!agentId) return baseCwd;
+  const base = baseCwd ?? `${process.env.HOME}/.openclaw/workspace`;
+  if (agentId === "main") return base;
+  return `${base}-${agentId}`;
+}
