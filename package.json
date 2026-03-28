@@ -36,6 +36,9 @@
     "access": "public"
   },
   "openclaw": {
+    "compat": {
+      "pluginApi": ">=2026.3.22"
+    },
     "extensions": [
       "./index.ts"
     ]
