@@ -1,6 +1,6 @@
 {
   "name": "@byterover/byterover",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "ByteRover context engine plugin for OpenClaw — curates and queries conversation context via brv CLI",
   "type": "module",
   "main": "index.ts",
@@ -30,7 +30,7 @@
     "vitest": "^3.0.0"
   },
   "peerDependencies": {
-    "openclaw": "*"
+    "openclaw": ">=2026.3.22"
   },
   "publishConfig": {
     "access": "public"
