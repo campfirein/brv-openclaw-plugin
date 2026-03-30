@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { accessSync, readFileSync, constants as fsConstants } from "node:fs";
+import { accessSync, existsSync, readFileSync, constants as fsConstants } from "node:fs";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 import type { PluginLogger } from "./types.js";
 
@@ -195,13 +195,24 @@ function runBrv(params: {
 
     child.on("error", (err) => {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        settle(
-          "reject",
-          new Error(
-            `ByteRover CLI not found at "${params.brvPath}". ` +
-              `Install it (https://www.byterover.dev) or set brvPath in plugin config.`,
-          ),
-        );
+        // ENOENT can mean the binary wasn't found OR the cwd doesn't exist.
+        if (!existsSync(params.cwd)) {
+          settle(
+            "reject",
+            new Error(
+              `Working directory "${params.cwd}" does not exist. ` +
+                `Set cwd in plugin config to a valid brv-initialized directory.`,
+            ),
+          );
+        } else {
+          settle(
+            "reject",
+            new Error(
+              `ByteRover CLI not found at "${params.brvPath}". ` +
+                `Install it (https://www.byterover.dev) or set brvPath in plugin config.`,
+            ),
+          );
+        }
         return;
       }
       params.logger.warn(`spawn error: ${err.message}`);

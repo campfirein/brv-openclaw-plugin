@@ -8,6 +8,9 @@
  * curated context.
  */
 
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 // ---------------------------------------------------------------------------
 // Sentinels — kept in sync with OpenClaw's buildInboundUserContextPrefix
 // ---------------------------------------------------------------------------
@@ -208,9 +211,8 @@ export function extractAgentId(sessionKey?: string): string | undefined {
  * Default baseCwd: ~/.openclaw/workspace
  */
 export function resolveWorkspaceDir(sessionKey?: string, baseCwd?: string): string | undefined {
+  const base = baseCwd ?? join(homedir(), ".openclaw", "workspace");
   const agentId = extractAgentId(sessionKey);
-  if (!agentId) return baseCwd;
-  const base = baseCwd ?? `${process.env.HOME}/.openclaw/workspace`;
-  if (agentId === "main") return base;
+  if (!agentId || agentId === "main") return base;
   return `${base}-${agentId}`;
 }
