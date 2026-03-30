@@ -1,5 +1,59 @@
 import { spawn } from "node:child_process";
+import { accessSync, existsSync, readFileSync, constants as fsConstants } from "node:fs";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 import type { PluginLogger } from "./types.js";
+
+/**
+ * On Windows, node scripts installed via npm cannot be spawned directly
+ * (EFTYPE), and using `shell: true` causes cmd.exe to mangle arguments.
+ * Resolve the underlying JS entry point and invoke it via node instead.
+ */
+function resolveWin32Command(name: string): { command: string; prependArgs: string[] } {
+  if (process.platform !== "win32") {
+    return { command: name, prependArgs: [] };
+  }
+
+  // If the configured path is a .cmd shim (e.g. npm global install), parse it
+  // to find the JS entry point it wraps and run that directly with node.
+  if (name.endsWith(".cmd")) {
+    const jsEntry = resolveJsFromCmdShim(name);
+    if (jsEntry) {
+      return { command: process.execPath, prependArgs: [jsEntry] };
+    }
+  }
+
+  // Bare name like "brv": search PATH for the extensionless script file.
+  if (!isAbsolute(name)) {
+    for (const dir of (process.env.PATH || "").split(delimiter)) {
+      // npm creates both `brv` (shell script) and `brv.cmd` on Windows.
+      // Check for a .cmd shim first so we can extract the real JS path.
+      const cmdCandidate = join(dir, name + ".cmd");
+      const jsEntry = resolveJsFromCmdShim(cmdCandidate);
+      if (jsEntry) {
+        return { command: process.execPath, prependArgs: [jsEntry] };
+      }
+    }
+  }
+
+  return { command: name, prependArgs: [] };
+}
+
+/** Parse an npm .cmd shim to extract the JS entry point it wraps. */
+function resolveJsFromCmdShim(cmdPath: string): string | undefined {
+  try {
+    const content = readFileSync(cmdPath, "utf8");
+    // npm .cmd shims contain a line like:
+    //   "%dp0%\node_modules\@scope\pkg\bin\run.js" %*
+    //   "%~dp0\node_modules\pkg\bin\cli.js" %*
+    const match = content.match(/"%(?:~dp0|dp0)%\\(node_modules\\[^"]+\.(?:js|cjs|mjs))"/i);
+    if (match) {
+      const resolved = join(dirname(cmdPath), match[1]);
+      accessSync(resolved, fsConstants.R_OK);
+      return resolved;
+    }
+  } catch {}
+  return undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Types — brv CLI JSON output shapes
@@ -87,7 +141,8 @@ function runBrv(params: {
       }
     }
 
-    const child = spawn(params.brvPath, params.args, {
+    const { command, prependArgs } = resolveWin32Command(params.brvPath);
+    const child = spawn(command, [...prependArgs, ...params.args], {
       cwd: params.cwd,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -140,13 +195,24 @@ function runBrv(params: {
 
     child.on("error", (err) => {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        settle(
-          "reject",
-          new Error(
-            `ByteRover CLI not found at "${params.brvPath}". ` +
-              `Install it (https://www.byterover.dev) or set brvPath in plugin config.`,
-          ),
-        );
+        // ENOENT can mean the binary wasn't found OR the cwd doesn't exist.
+        if (!existsSync(params.cwd)) {
+          settle(
+            "reject",
+            new Error(
+              `Working directory "${params.cwd}" does not exist. ` +
+                `Set cwd in plugin config to a valid brv-initialized directory.`,
+            ),
+          );
+        } else {
+          settle(
+            "reject",
+            new Error(
+              `ByteRover CLI not found at "${params.brvPath}". ` +
+                `Install it (https://www.byterover.dev) or set brvPath in plugin config.`,
+            ),
+          );
+        }
         return;
       }
       params.logger.warn(`spawn error: ${err.message}`);
