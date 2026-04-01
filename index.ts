@@ -1,5 +1,5 @@
 import type { OpenClawPluginApi } from "./src/types.js";
-import type { BrvProcessConfig } from "./src/brv-process.js";
+import type { BrvBridgeConfig } from "@byterover/brv-bridge";
 import { ByteRoverContextEngine } from "./src/context-engine.js";
 
 const byteRoverPlugin = {
@@ -10,16 +10,16 @@ const byteRoverPlugin = {
   register(api: OpenClawPluginApi) {
     const pluginConfig = (api.pluginConfig ?? {}) as Record<string, unknown>;
 
-    const brvConfig: BrvProcessConfig = {
+    const bridgeConfig: BrvBridgeConfig = {
       brvPath: typeof pluginConfig.brvPath === "string" ? pluginConfig.brvPath : undefined,
       cwd: typeof pluginConfig.cwd === "string" ? pluginConfig.cwd : undefined,
-      queryTimeoutMs:
+      recallTimeoutMs:
         typeof pluginConfig.queryTimeoutMs === "number" ? pluginConfig.queryTimeoutMs : undefined,
-      curateTimeoutMs:
+      persistTimeoutMs:
         typeof pluginConfig.curateTimeoutMs === "number" ? pluginConfig.curateTimeoutMs : undefined,
     };
 
-    api.registerContextEngine("byterover", () => new ByteRoverContextEngine(brvConfig, api.logger));
+    api.registerContextEngine("byterover", () => new ByteRoverContextEngine(bridgeConfig, api.logger));
 
     api.logger.info("[byterover] Plugin loaded");
   },

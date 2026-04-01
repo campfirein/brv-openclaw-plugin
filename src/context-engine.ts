@@ -6,15 +6,16 @@ import type {
   IngestResult,
   PluginLogger,
 } from "./types.js";
-import { brvCurate, brvQuery, type BrvProcessConfig } from "./brv-process.js";
+import { BrvBridge, type BrvBridgeConfig } from "@byterover/brv-bridge";
 import { stripUserMetadata, extractSenderInfo, stripAssistantTags, resolveWorkspaceDir } from "./message-utils.js";
 
 /**
- * ByteRoverContextEngine integrates the brv CLI as an OpenClaw context engine.
+ * ByteRoverContextEngine integrates ByteRover as an OpenClaw context engine
+ * via the brv-bridge standard interface.
  *
  * Lifecycle mapping:
- *   - afterTurn  → `brv curate` (feed conversation turns for curation)
- *   - assemble   → `brv query`  (retrieve curated knowledge as system prompt addition)
+ *   - afterTurn  → bridge.persist() (feed conversation turns for curation)
+ *   - assemble   → bridge.recall()  (retrieve curated knowledge as system prompt addition)
  *   - ingest     → no-op (afterTurn handles batch ingestion)
  *   - compact    → not owned (runtime handles compaction via legacy path)
  */
@@ -26,12 +27,14 @@ export class ByteRoverContextEngine implements ContextEngine {
     ownsCompaction: false,
   };
 
-  private readonly config: BrvProcessConfig;
+  private readonly bridge: BrvBridge;
   private readonly logger: PluginLogger;
+  private readonly baseCwd: string;
 
-  constructor(config: BrvProcessConfig, logger: PluginLogger) {
-    this.config = config;
+  constructor(config: BrvBridgeConfig, logger: PluginLogger) {
+    this.bridge = new BrvBridge({ ...config, logger });
     this.logger = logger;
+    this.baseCwd = config.cwd;
   }
 
   // ---------------------------------------------------------------------------
@@ -47,7 +50,7 @@ export class ByteRoverContextEngine implements ContextEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // afterTurn — feed the completed turn to brv curate
+  // afterTurn — feed the completed turn to bridge.persist()
   // ---------------------------------------------------------------------------
 
   async afterTurn(params: {
@@ -70,7 +73,7 @@ export class ByteRoverContextEngine implements ContextEngine {
       return;
     }
 
-    // Serialize messages into a text block for brv curate
+    // Serialize messages into a text block for curation
     const serialized = serializeMessagesForCurate(newMessages);
     if (!serialized.trim()) {
       this.logger.debug?.("afterTurn skipped (empty serialized context)");
@@ -83,32 +86,17 @@ export class ByteRoverContextEngine implements ContextEngine {
       `Skip trivial messages such as greetings, acknowledgments ("ok", "thanks", "sure", "got it"), one-word replies, anything with no substantive content, or automated session-start messages (e.g. "/new", "/reset" and their system-generated continuations).\n\n` +
       `Conversation:\n${serialized}`;
 
-    const cwd = resolveWorkspaceDir(params.sessionKey, this.config.cwd) ?? process.cwd();
+    const cwd = resolveWorkspaceDir(params.sessionKey, this.baseCwd) ?? this.baseCwd;
     this.logger.info(
       `afterTurn curating ${newMessages.length} new messages (${context.length} chars, cwd=${cwd})`,
     );
-    try {
-      const result = await brvCurate({
-        config: this.config,
-        logger: this.logger,
-        context,
-        cwd,
-        // --detach tells the brv daemon to queue curation work asynchronously.
-        // The CLI process itself exits immediately (~ms) after the daemon acknowledges
-        // the request, so the await here only waits for that quick handshake — not for
-        // the actual curation to complete. We still await to capture the JSON response
-        // (queued status, task ID) and to surface ENOENT / crash errors.
-        detach: true,
-      });
-      this.logger.debug?.(`afterTurn curate result: ${JSON.stringify(result.data?.status)}`);
-    } catch (err) {
-      // Best-effort: don't fail the turn if curation fails
-      this.logger.warn(`curate failed (best-effort): ${String(err)}`);
-    }
+
+    const result = await this.bridge.persist(context, { cwd });
+    this.logger.debug?.(`afterTurn curate result: ${JSON.stringify(result.status)}`);
   }
 
   // ---------------------------------------------------------------------------
-  // assemble — query brv for curated knowledge and inject as system prompt
+  // assemble — recall curated knowledge and inject as system prompt
   // ---------------------------------------------------------------------------
 
   async assemble(params: {
@@ -133,7 +121,6 @@ export class ByteRoverContextEngine implements ContextEngine {
     }
 
     // Skip trivially short queries (e.g. "ok", "hi", "yes") — not worth a brv spawn.
-    // Applied after metadata stripping so inflated raw prompts don't bypass this.
     if (query.length < 5) {
       this.logger.debug?.(`assemble skipped brv query (query too short: "${query}")`);
       return {
@@ -142,35 +129,25 @@ export class ByteRoverContextEngine implements ContextEngine {
       };
     }
 
+    const cwd = resolveWorkspaceDir(params.sessionKey, this.baseCwd) ?? this.baseCwd;
+
     // Abort-based deadline so we never exceed the agent ready timeout (15s).
-    // Default 10s — leaves headroom for the runtime's own overhead.
-    // The signal is passed to brvQuery → runBrv, which kills the child process on abort.
-    const assembleTimeout = this.config.queryTimeoutMs
-      ? Math.min(this.config.queryTimeoutMs, 10_000)
-      : 10_000;
-
-    const cwd = resolveWorkspaceDir(params.sessionKey, this.config.cwd) ?? process.cwd();
-    this.logger.debug?.(
-      `assemble querying brv: "${query.slice(0, 100)}${query.length > 100 ? "..." : ""}" (timeout=${assembleTimeout}ms, cwd=${cwd})`,
-    );
-    let systemPromptAddition: string | undefined;
     const ac = new AbortController();
-    const deadline = setTimeout(() => ac.abort(), assembleTimeout);
-    try {
-      const result = await brvQuery({
-        config: this.config,
-        logger: this.logger,
-        query,
-        signal: ac.signal,
-        cwd,
-      });
+    const deadline = setTimeout(() => ac.abort(), 10_000);
 
-      const answer = result.data?.result ?? result.data?.content;
-      if (answer && answer.trim()) {
+    this.logger.debug?.(
+      `assemble querying brv: "${query.slice(0, 100)}${query.length > 100 ? "..." : ""}" (cwd=${cwd})`,
+    );
+
+    let systemPromptAddition: string | undefined;
+    try {
+      const result = await this.bridge.recall(query, { signal: ac.signal, cwd });
+
+      if (result.content) {
         systemPromptAddition =
           `<byterover-context>\n` +
           `The following curated knowledge is from ByteRover context engine:\n\n` +
-          `${answer.trim()}\n` +
+          `${result.content}\n` +
           `</byterover-context>`;
         this.logger.info(
           `assemble injecting systemPromptAddition (${systemPromptAddition.length} chars)`,
@@ -179,22 +156,14 @@ export class ByteRoverContextEngine implements ContextEngine {
         this.logger.debug?.("assemble brv query returned empty result");
       }
     } catch (err) {
-      // Don't fail the prompt if brv query fails or times out
-      const msg = String(err);
-      if (msg.includes("aborted")) {
-        this.logger.warn(
-          `assemble brv query timed out after ${assembleTimeout}ms — proceeding without context`,
-        );
-      } else {
-        this.logger.warn(`query failed (best-effort): ${msg}`);
-      }
+      this.logger.warn(`recall failed (best-effort): ${String(err)}`);
     } finally {
       clearTimeout(deadline);
     }
 
     return {
       messages: params.messages as AssembleResult["messages"],
-      estimatedTokens: 0, // Caller handles estimation
+      estimatedTokens: 0,
       systemPromptAddition,
     };
   }
@@ -217,10 +186,11 @@ export class ByteRoverContextEngine implements ContextEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // dispose — no persistent resources to clean up
+  // dispose — delegate to bridge shutdown
   // ---------------------------------------------------------------------------
 
   async dispose(): Promise<void> {
+    await this.bridge.shutdown();
     this.logger.debug?.("dispose called");
   }
 }
@@ -230,7 +200,7 @@ export class ByteRoverContextEngine implements ContextEngine {
 // ---------------------------------------------------------------------------
 
 /**
- * Serialize agent messages into a human-readable text block for brv curate.
+ * Serialize agent messages into a human-readable text block for curation.
  *
  * - User messages: strip metadata noise, attribute with sender name + timestamp
  * - Assistant messages: strip <final>/<think> tags
