@@ -1,25 +1,23 @@
 import type { PluginLogger } from "../src/types.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { BrvJsonResponse, BrvQueryResult } from "../src/brv-process.js";
 import { ByteRoverContextEngine } from "../src/context-engine.js";
 
 // ---------------------------------------------------------------------------
-// Mock brv-process so no real CLI is spawned
+// Mock @byterover/brv-bridge so no real CLI is spawned
 // ---------------------------------------------------------------------------
 
-type BrvQueryFn = typeof import("../src/brv-process.js").brvQuery;
+const mockRecall = vi.fn();
+const mockPersist = vi.fn();
+const mockShutdown = vi.fn();
 
-const mocks = vi.hoisted(() => ({
-  brvQuery: vi.fn<BrvQueryFn>(),
+vi.mock("@byterover/brv-bridge", () => ({
+  BrvBridge: vi.fn().mockImplementation(() => ({
+    recall: mockRecall,
+    persist: mockPersist,
+    shutdown: mockShutdown,
+    ready: vi.fn().mockResolvedValue(true),
+  })),
 }));
-
-vi.mock("../src/brv-process.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/brv-process.js")>();
-  return {
-    ...actual,
-    brvQuery: mocks.brvQuery,
-  };
-});
 
 function makeLogger(): PluginLogger {
   return {
@@ -30,17 +28,8 @@ function makeLogger(): PluginLogger {
   };
 }
 
-function makeQueryResponse(result: string): BrvJsonResponse<BrvQueryResult> {
-  return {
-    command: "query",
-    success: true,
-    timestamp: new Date().toISOString(),
-    data: { status: "completed", result },
-  };
-}
-
 // ---------------------------------------------------------------------------
-// Integration tests — assemble → brvQuery with mocked brv
+// Integration tests — assemble → bridge.recall with mocked bridge
 // ---------------------------------------------------------------------------
 
 describe("ByteRoverContextEngine integration", () => {
@@ -49,16 +38,16 @@ describe("ByteRoverContextEngine integration", () => {
   });
 
   // -------------------------------------------------------------------------
-  // assemble → brvQuery
+  // assemble → bridge.recall
   // -------------------------------------------------------------------------
 
-  describe("assemble → brvQuery", () => {
-    it("calls brvQuery with cleaned prompt and injects systemPromptAddition", async () => {
-      mocks.brvQuery.mockResolvedValue(
-        makeQueryResponse("User prefers TypeScript with strict mode."),
-      );
+  describe("assemble → bridge.recall", () => {
+    it("calls recall with cleaned prompt and injects systemPromptAddition", async () => {
+      mockRecall.mockResolvedValue({
+        content: "User prefers TypeScript with strict mode.",
+      });
       const logger = makeLogger();
-      const engine = new ByteRoverContextEngine({}, logger);
+      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, logger);
       const messages = [{ role: "user", content: "Tell me about TS config" }] as unknown[];
 
       const result = await engine.assemble({
@@ -67,10 +56,10 @@ describe("ByteRoverContextEngine integration", () => {
         prompt: "Tell me about TS config",
       });
 
-      expect(mocks.brvQuery).toHaveBeenCalledOnce();
-      const call = mocks.brvQuery.mock.calls[0][0];
-      expect(call.query).toBe("Tell me about TS config");
-      expect(call.signal).toBeInstanceOf(AbortSignal);
+      expect(mockRecall).toHaveBeenCalledOnce();
+      const call = mockRecall.mock.calls[0];
+      expect(call[0]).toBe("Tell me about TS config");
+      expect(call[1]).toHaveProperty("signal");
 
       expect(result.systemPromptAddition).toContain("<byterover-context>");
       expect(result.systemPromptAddition).toContain("User prefers TypeScript with strict mode.");
@@ -78,9 +67,9 @@ describe("ByteRoverContextEngine integration", () => {
       expect(result.messages).toBe(messages);
     });
 
-    it("strips metadata from prompt before querying brv", async () => {
-      mocks.brvQuery.mockResolvedValue(makeQueryResponse("some context"));
-      const engine = new ByteRoverContextEngine({}, makeLogger());
+    it("strips metadata from prompt before querying", async () => {
+      mockRecall.mockResolvedValue({ content: "some context" });
+      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
 
       const prompt = [
         "Sender (untrusted metadata):",
@@ -96,14 +85,14 @@ describe("ByteRoverContextEngine integration", () => {
         prompt,
       });
 
-      const call = mocks.brvQuery.mock.calls[0][0];
-      expect(call.query).toBe("How do I configure plugins?");
-      expect(call.query).not.toContain("untrusted metadata");
+      const query = mockRecall.mock.calls[0][0];
+      expect(query).toBe("How do I configure plugins?");
+      expect(query).not.toContain("untrusted metadata");
     });
 
     it("falls back to extracting query from messages when no prompt", async () => {
-      mocks.brvQuery.mockResolvedValue(makeQueryResponse("relevant context"));
-      const engine = new ByteRoverContextEngine({}, makeLogger());
+      mockRecall.mockResolvedValue({ content: "relevant context" });
+      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
 
       const messages = [
         { role: "assistant", content: "Hello!" },
@@ -112,15 +101,15 @@ describe("ByteRoverContextEngine integration", () => {
 
       const result = await engine.assemble({ sessionId: "s1", messages });
 
-      const call = mocks.brvQuery.mock.calls[0][0];
-      expect(call.query).toBe("What are context engines?");
+      const query = mockRecall.mock.calls[0][0];
+      expect(query).toBe("What are context engines?");
       expect(result.systemPromptAddition).toContain("relevant context");
     });
 
-    it("returns no systemPromptAddition when brvQuery returns empty result", async () => {
-      mocks.brvQuery.mockResolvedValue(makeQueryResponse(""));
+    it("returns no systemPromptAddition when recall returns empty content", async () => {
+      mockRecall.mockResolvedValue({ content: "" });
       const logger = makeLogger();
-      const engine = new ByteRoverContextEngine({}, logger);
+      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, logger);
 
       const result = await engine.assemble({
         sessionId: "s1",
@@ -132,10 +121,10 @@ describe("ByteRoverContextEngine integration", () => {
       expect(logger.debug).toHaveBeenCalledWith("assemble brv query returned empty result");
     });
 
-    it("returns no systemPromptAddition when brvQuery throws", async () => {
-      mocks.brvQuery.mockRejectedValue(new Error("connection refused"));
+    it("returns no systemPromptAddition when recall throws", async () => {
+      mockRecall.mockRejectedValue(new Error("connection refused"));
       const logger = makeLogger();
-      const engine = new ByteRoverContextEngine({}, logger);
+      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, logger);
 
       const result = await engine.assemble({
         sessionId: "s1",
@@ -144,42 +133,76 @@ describe("ByteRoverContextEngine integration", () => {
       });
 
       expect(result.systemPromptAddition).toBeUndefined();
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining("query failed (best-effort)"),
-      );
     });
 
-    it("logs timeout warning when brvQuery is aborted", async () => {
-      mocks.brvQuery.mockRejectedValue(new Error("brv query aborted"));
-      const logger = makeLogger();
-      const engine = new ByteRoverContextEngine({}, logger);
+    it("passes cwd override from resolveWorkspaceDir", async () => {
+      mockRecall.mockResolvedValue({ content: "answer" });
+      const engine = new ByteRoverContextEngine({ cwd: "/base/dir" }, makeLogger());
 
-      const result = await engine.assemble({
+      await engine.assemble({
         sessionId: "s1",
+        sessionKey: "agent:sub1:channel",
         messages: [],
         prompt: "a valid question",
       });
 
-      expect(result.systemPromptAddition).toBeUndefined();
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("timed out"));
+      const options = mockRecall.mock.calls[0][1];
+      expect(options.cwd).toBe("/base/dir-sub1");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // afterTurn → bridge.persist
+  // -------------------------------------------------------------------------
+
+  describe("afterTurn → bridge.persist", () => {
+    it("calls persist with serialized conversation", async () => {
+      mockPersist.mockResolvedValue({ status: "queued" });
+      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
+
+      const messages = [
+        { role: "user", content: "What is ByteRover?" },
+        { role: "assistant", content: "ByteRover is a context engine." },
+      ] as unknown[];
+
+      await engine.afterTurn({
+        sessionId: "s1",
+        sessionFile: "/tmp/s1.jsonl",
+        messages,
+        prePromptMessageCount: 0,
+      });
+
+      expect(mockPersist).toHaveBeenCalledOnce();
+      const context = mockPersist.mock.calls[0][0];
+      expect(context).toContain("What is ByteRover?");
+      expect(context).toContain("ByteRover is a context engine.");
     });
 
-    it("uses result.content as fallback when result.result is missing", async () => {
-      mocks.brvQuery.mockResolvedValue({
-        command: "query",
-        success: true,
-        timestamp: new Date().toISOString(),
-        data: { status: "completed" as const, content: "fallback content here" },
-      });
-      const engine = new ByteRoverContextEngine({}, makeLogger());
+    it("skips heartbeat turns", async () => {
+      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
 
-      const result = await engine.assemble({
+      await engine.afterTurn({
         sessionId: "s1",
-        messages: [],
-        prompt: "tell me something",
+        sessionFile: "/tmp/s1.jsonl",
+        messages: [{ role: "user", content: "hi" }] as unknown[],
+        prePromptMessageCount: 0,
+        isHeartbeat: true,
       });
 
-      expect(result.systemPromptAddition).toContain("fallback content here");
+      expect(mockPersist).not.toHaveBeenCalled();
+    });
+
+    it("skips when no new messages", async () => {
+      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
+
+      await engine.afterTurn({
+        sessionId: "s1",
+        sessionFile: "/tmp/s1.jsonl",
+        messages: [{ role: "user", content: "old" }] as unknown[],
+        prePromptMessageCount: 1,
+      });
+
+      expect(mockPersist).not.toHaveBeenCalled();
     });
   });
 });

@@ -18,14 +18,14 @@ function makeLogger(): PluginLogger {
 
 describe("ByteRoverContextEngine", () => {
   it("has correct info fields", () => {
-    const engine = new ByteRoverContextEngine({}, makeLogger());
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
     expect(engine.info.id).toBe("byterover");
     expect(engine.info.name).toBe("ByteRover");
     expect(engine.info.ownsCompaction).toBe(false);
   });
 
   it("ingest returns { ingested: false }", async () => {
-    const engine = new ByteRoverContextEngine({}, makeLogger());
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
     const result = await engine.ingest({
       sessionId: "s1",
       message: { role: "user", content: "hi" },
@@ -34,7 +34,7 @@ describe("ByteRoverContextEngine", () => {
   });
 
   it("compact returns not-compacted", async () => {
-    const engine = new ByteRoverContextEngine({}, makeLogger());
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
     const result = await engine.compact({
       sessionId: "s1",
       sessionFile: "/tmp/s1.jsonl",
@@ -44,7 +44,7 @@ describe("ByteRoverContextEngine", () => {
   });
 
   it("assemble returns messages pass-through when no prompt and no user messages", async () => {
-    const engine = new ByteRoverContextEngine({}, makeLogger());
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
     const messages = [{ role: "assistant", content: "hello" }] as unknown[];
     const result = await engine.assemble({
       sessionId: "s1",
@@ -57,7 +57,7 @@ describe("ByteRoverContextEngine", () => {
 
   it("assemble skips brv query for trivially short prompts", async () => {
     const logger = makeLogger();
-    const engine = new ByteRoverContextEngine({}, logger);
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, logger);
     const messages = [{ role: "user", content: "ok" }] as unknown[];
     const result = await engine.assemble({
       sessionId: "s1",
@@ -72,7 +72,7 @@ describe("ByteRoverContextEngine", () => {
 
   it("assemble skips brv query for short prompts after metadata stripping", async () => {
     const logger = makeLogger();
-    const engine = new ByteRoverContextEngine({}, logger);
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, logger);
     const prompt = [
       "Sender (untrusted metadata):",
       "```json",
