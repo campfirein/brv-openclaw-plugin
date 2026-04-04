@@ -29,7 +29,7 @@ export class ByteRoverContextEngine implements ContextEngine {
 
   private readonly bridge: BrvBridge;
   private readonly logger: PluginLogger;
-  private readonly baseCwd: string;
+  private readonly baseCwd: string | undefined;
 
   constructor(config: BrvBridgeConfig, logger: PluginLogger) {
     this.bridge = new BrvBridge({ ...config, logger });

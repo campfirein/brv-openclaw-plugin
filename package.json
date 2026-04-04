@@ -24,7 +24,7 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@byterover/brv-bridge": "file:../brv-bridge"
+    "@byterover/brv-bridge": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
