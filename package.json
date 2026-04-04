@@ -1,10 +1,10 @@
 {
   "name": "@byterover/byterover",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "ByteRover context engine plugin for OpenClaw — curates and queries conversation context via brv CLI",
   "type": "module",
   "main": "index.ts",
-  "license": "MIT",
+  "license": "Elastic-2.0",
   "author": "ByteRover",
   "keywords": [
     "openclaw",
@@ -23,7 +23,9 @@
     "README.md",
     "LICENSE"
   ],
-  "dependencies": {},
+  "dependencies": {
+    "@byterover/brv-bridge": "^1.0.2"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
@@ -31,6 +33,14 @@
   },
   "peerDependencies": {
     "openclaw": ">=2026.3.22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/campfirein/brv-openclaw-plugin.git"
+  },
+  "homepage": "https://github.com/campfirein/brv-openclaw-plugin#readme",
+  "bugs": {
+    "url": "https://github.com/campfirein/brv-openclaw-plugin/issues"
   },
   "publishConfig": {
     "access": "public"
