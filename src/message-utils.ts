@@ -8,6 +8,7 @@
  * curated context.
  */
 
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -207,12 +208,31 @@ export function extractAgentId(sessionKey?: string): string | undefined {
 
 /**
  * Resolve workspace directory from sessionKey.
- * Convention: "main" agent uses baseCwd as-is, others use baseCwd-<agentId>.
- * Default baseCwd: ~/.openclaw/workspace
+ * Reads agent workspace from ~/.openclaw/openclaw.json:
+ *   agents.list[id].workspace  → agent-specific workspace
+ *   agents.defaults.workspace  → fallback default
+ * Falls back to legacy convention if the config is unreadable.
  */
 export function resolveWorkspaceDir(sessionKey?: string, baseCwd?: string): string | undefined {
-  const base = baseCwd ?? join(homedir(), ".openclaw", "workspace");
   const agentId = extractAgentId(sessionKey);
+
+  try {
+    const configPath = join(homedir(), ".openclaw", "openclaw.json");
+    const config = JSON.parse(readFileSync(configPath, "utf-8"));
+    const agents = config?.agents;
+
+    if (agentId && agentId !== "main") {
+      const list = agents?.list as Array<{ id: string; workspace?: string }> | undefined;
+      const workspace = list?.find((a) => a.id === agentId)?.workspace;
+      if (workspace) return workspace;
+    }
+
+    if (agents?.defaults?.workspace) return agents.defaults.workspace as string;
+  } catch {
+    // fall through to legacy behavior
+  }
+
+  const base = baseCwd ?? join(homedir(), ".openclaw", "workspace");
   if (!agentId || agentId === "main") return base;
   return `${base}-${agentId}`;
 }
