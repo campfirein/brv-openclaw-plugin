@@ -3,7 +3,7 @@
   "version": "1.1.7",
   "description": "ByteRover context engine plugin for OpenClaw — curates and queries conversation context via brv CLI",
   "type": "module",
-  "main": "index.ts",
+  "main": "./index.js",
   "license": "Elastic-2.0",
   "author": "ByteRover",
   "keywords": [
@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "files": [
+    "index.js",
     "index.ts",
     "src/**/*.ts",
     "openclaw.plugin.json",
@@ -55,7 +56,10 @@
       "pluginSdkVersion": "2026.3.22"
     },
     "extensions": [
-      "./index.ts"
+      "./index.js"
     ]
+  },
+  "exports": {
+    ".": "./index.js"
   }
 }
