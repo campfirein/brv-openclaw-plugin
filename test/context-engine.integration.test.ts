@@ -19,6 +19,29 @@ vi.mock("@byterover/brv-bridge", () => ({
   })),
 }));
 
+// ---------------------------------------------------------------------------
+// Mock node:fs so resolveWorkspaceDir's read of ~/.openclaw/openclaw.json
+// doesn't leak the developer's actual config into the test.
+// Throwing for that path forces resolveWorkspaceDir into its legacy fallback,
+// which the cwd-override assertion below was written against.
+// Pass-through for any other readFileSync call so unrelated fs operations
+// (vitest's own internals, source-map loaders, etc.) still work.
+// ---------------------------------------------------------------------------
+
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    readFileSync: vi.fn((...args: Parameters<typeof actual.readFileSync>) => {
+      const path = args[0];
+      if (typeof path === "string" && path.includes("openclaw.json")) {
+        throw new Error("ENOENT: openclaw.json not present in test env");
+      }
+      return actual.readFileSync(...args);
+    }),
+  };
+});
+
 function makeLogger(): PluginLogger {
   return {
     debug: vi.fn(),
