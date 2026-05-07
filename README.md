@@ -39,11 +39,16 @@ The result: your agent remembers what matters, forgets what doesn't, and retriev
 openclaw plugins install @byterover/byterover
 ```
 
-For local development, link your working copy instead:
+For local development, build the plugin once and link your working copy:
 
 ```bash
+cd /path/to/brv-openclaw-plugin
+npm install
+npm run build
 openclaw plugins install --link /path/to/brv-openclaw-plugin
 ```
+
+OpenClaw's install validator requires compiled runtime output (`dist/index.js`) before it will accept a path-linked plugin, so the `npm run build` step is mandatory. Re-run `npm run build` after editing the source.
 
 ### 2. Configure the context engine slot
 
@@ -151,11 +156,14 @@ Ingestion is handled by `afterTurn` in batch (all new messages from the turn at 
 # Install dependencies
 npm install
 
-# Type check
-npx tsc --noEmit
+# Type check runtime code (tests are checked by vitest)
+npm run typecheck
 
 # Run tests
-npx vitest run --dir test
+npm test
+
+# Build runtime output (required before linking)
+npm run build
 
 # Link for local testing with OpenClaw
 openclaw plugins install --link .
