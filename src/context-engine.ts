@@ -7,23 +7,40 @@ import type {
   PluginLogger,
 } from "./types.js";
 import { BrvBridge, type BrvBridgeConfig } from "@byterover/brv-bridge";
-import { stripUserMetadata, extractSenderInfo, stripAssistantTags, resolveWorkspaceDir } from "./message-utils.js";
+import { stripUserMetadata, resolveWorkspaceDir } from "./message-utils.js";
+
+const CURATE_GUIDANCE = `<byterover-curate-guidance>
+You have access to brv-curate (for saving knowledge) and brv-query (for retrieving it).
+
+Call brv-curate when your turn produces:
+  - decisions (architecture choices, library selections, design trade-offs)
+  - patterns (recurring code structures, error-handling conventions)
+  - facts (environment details, file locations, version info)
+  - rules (must-do or must-not-do constraints with rationale)
+
+Author a single <bv-topic> document capturing the knowledge. Use the bv-* element vocabulary described in the brv-curate tool's parameter schema. Set meta.impact to "high" for load-bearing decisions or rules that downstream code depends on.
+
+Skip brv-curate when the turn was conversational, exploratory without conclusions, or covered material already in your retrieved context.
+</byterover-curate-guidance>`;
 
 /**
  * ByteRoverContextEngine integrates ByteRover as an OpenClaw context engine
  * via the brv-bridge standard interface.
  *
- * Lifecycle mapping:
- *   - afterTurn  → bridge.persist() (feed conversation turns for curation)
- *   - assemble   → bridge.recall()  (retrieve curated knowledge as system prompt addition)
- *   - ingest     → no-op (afterTurn handles batch ingestion)
- *   - compact    → not owned (runtime handles compaction via legacy path)
+ * v2 lifecycle:
+ *   - assemble   → bridge.recall() returns curated knowledge; ALSO injects
+ *                  brv-curate guidance every turn so the agent knows when
+ *                  to call the registered `brv-curate` tool.
+ *   - afterTurn  → no-op. Curate is agent-initiated in v2; the agent calls
+ *                  the brv-curate tool directly during a turn.
+ *   - ingest     → no-op (legacy).
+ *   - compact    → not owned (runtime handles compaction).
  */
 export class ByteRoverContextEngine implements ContextEngine {
   readonly info: ContextEngineInfo = {
     id: "byterover",
     name: "ByteRover",
-    version: "0.1.0",
+    version: "2.0.0",
     ownsCompaction: false,
   };
 
@@ -38,7 +55,7 @@ export class ByteRoverContextEngine implements ContextEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // ingest — no-op (afterTurn handles it)
+  // ingest — no-op (afterTurn handled it pre-v2; v2 has no auto-curate)
   // ---------------------------------------------------------------------------
 
   async ingest(_params: {
@@ -50,10 +67,12 @@ export class ByteRoverContextEngine implements ContextEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // afterTurn — feed the completed turn to bridge.persist()
+  // afterTurn — no-op. Curate is agent-initiated in v2; see assemble's
+  // injected `<byterover-curate-guidance>` block. ContextEngine interface
+  // still requires the method, so we keep it as a returning stub.
   // ---------------------------------------------------------------------------
 
-  async afterTurn(params: {
+  async afterTurn(_params: {
     sessionId: string;
     sessionKey?: string;
     sessionFile: string;
@@ -61,42 +80,12 @@ export class ByteRoverContextEngine implements ContextEngine {
     prePromptMessageCount: number;
     isHeartbeat?: boolean;
   }): Promise<void> {
-    if (params.isHeartbeat) {
-      this.logger.debug?.("afterTurn skipped (heartbeat)");
-      return;
-    }
-
-    // Extract only the new messages from this turn
-    const newMessages = params.messages.slice(params.prePromptMessageCount);
-    if (newMessages.length === 0) {
-      this.logger.debug?.("afterTurn skipped (no new messages)");
-      return;
-    }
-
-    // Serialize messages into a text block for curation
-    const serialized = serializeMessagesForCurate(newMessages);
-    if (!serialized.trim()) {
-      this.logger.debug?.("afterTurn skipped (empty serialized context)");
-      return;
-    }
-
-    const context =
-      `The following is a conversation between a user and an AI assistant (OpenClaw).\n` +
-      `Curate only information with lasting value: facts, decisions, technical details, preferences, or notable outcomes.\n` +
-      `Skip trivial messages such as greetings, acknowledgments ("ok", "thanks", "sure", "got it"), one-word replies, anything with no substantive content, or automated session-start messages (e.g. "/new", "/reset" and their system-generated continuations).\n\n` +
-      `Conversation:\n${serialized}`;
-
-    const cwd = resolveWorkspaceDir(params.sessionKey, this.baseCwd) ?? this.baseCwd;
-    this.logger.info(
-      `afterTurn curating ${newMessages.length} new messages (${context.length} chars, cwd=${cwd})`,
-    );
-
-    const result = await this.bridge.persist(context, { cwd });
-    this.logger.debug?.(`afterTurn curate result: ${JSON.stringify(result.status)}`);
+    // No-op: the agent invokes the brv-curate tool directly when its turn
+    // produces curate-worthy content. See `assemble` for the guidance.
   }
 
   // ---------------------------------------------------------------------------
-  // assemble — recall curated knowledge and inject as system prompt
+  // assemble — recall curated knowledge AND inject curate guidance
   // ---------------------------------------------------------------------------
 
   async assemble(params: {
@@ -112,20 +101,29 @@ export class ByteRoverContextEngine implements ContextEngine {
     const query = rawPrompt
       ? stripUserMetadata(rawPrompt).trim() || null
       : extractLatestUserQuery(params.messages);
+
+    // Build the systemPromptAddition. The curate-guidance block is included
+    // EVERY turn — even when no recall content surfaces — so the agent
+    // always knows the tools are available.
+    let systemPromptAddition: string | undefined = CURATE_GUIDANCE;
+
+    // Skip the recall network call when we have no usable query.
     if (!query) {
-      this.logger.debug?.("assemble skipped brv query (no user message found)");
+      this.logger.debug?.("assemble skipped brv recall (no user message found)");
       return {
         messages: params.messages as AssembleResult["messages"],
         estimatedTokens: 0,
+        systemPromptAddition,
       };
     }
 
     // Skip trivially short queries (e.g. "ok", "hi", "yes") — not worth a brv spawn.
     if (query.length < 5) {
-      this.logger.debug?.(`assemble skipped brv query (query too short: "${query}")`);
+      this.logger.debug?.(`assemble skipped brv recall (query too short: "${query}")`);
       return {
         messages: params.messages as AssembleResult["messages"],
         estimatedTokens: 0,
+        systemPromptAddition,
       };
     }
 
@@ -139,21 +137,21 @@ export class ByteRoverContextEngine implements ContextEngine {
       `assemble querying brv: "${query.slice(0, 100)}${query.length > 100 ? "..." : ""}" (cwd=${cwd})`,
     );
 
-    let systemPromptAddition: string | undefined;
     try {
       const result = await this.bridge.recall(query, { signal: ac.signal, cwd });
 
       if (result.content) {
-        systemPromptAddition =
+        const contextBlock =
           `<byterover-context>\n` +
           `The following curated knowledge is from ByteRover context engine:\n\n` +
           `${result.content}\n` +
           `</byterover-context>`;
+        systemPromptAddition = `${contextBlock}\n\n${CURATE_GUIDANCE}`;
         this.logger.info(
-          `assemble injecting systemPromptAddition (${systemPromptAddition.length} chars)`,
+          `assemble injecting systemPromptAddition (${systemPromptAddition.length} chars: ${result.content.length} recall + guidance)`,
         );
       } else {
-        this.logger.debug?.("assemble brv query returned empty result");
+        this.logger.debug?.("assemble brv query returned empty result — guidance-only addition");
       }
     } catch (err) {
       this.logger.warn(`recall failed (best-effort): ${String(err)}`);
@@ -193,51 +191,23 @@ export class ByteRoverContextEngine implements ContextEngine {
     await this.bridge.shutdown();
     this.logger.debug?.("dispose called");
   }
-}
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Bridge accessor — used by index.ts so tools share the same instance
+  // ---------------------------------------------------------------------------
 
-/**
- * Serialize agent messages into a human-readable text block for curation.
- *
- * - User messages: strip metadata noise, attribute with sender name + timestamp
- * - Assistant messages: strip <final>/<think> tags
- * - toolResult messages: skipped (internal implementation details)
- */
-export function serializeMessagesForCurate(messages: unknown[]): string {
-  const lines: string[] = [];
-  for (const msg of messages) {
-    const m = msg as { role?: string; content?: unknown };
-    if (!m.role) continue;
-
-    // Skip tool results — internal details, not useful for curation
-    if (m.role === "toolResult") continue;
-
-    let text = extractTextContent(m.content);
-    if (!text.trim()) continue;
-
-    if (m.role === "user") {
-      // Extract sender info before stripping metadata
-      const sender = extractSenderInfo(text);
-      text = stripUserMetadata(text);
-      if (!text.trim()) continue;
-
-      // Build clean attribution header
-      const parts = [sender?.name, sender?.timestamp].filter(Boolean);
-      const label = parts.length > 0 ? parts.join(" @ ") : "user";
-      lines.push(`[${label}]: ${text.trim()}`);
-    } else if (m.role === "assistant") {
-      text = stripAssistantTags(text);
-      if (!text.trim()) continue;
-      lines.push(`[assistant]: ${text.trim()}`);
-    } else {
-      lines.push(`[${m.role}]: ${text.trim()}`);
-    }
+  /** Internal accessor: lets the plugin's `register` share the bridge with the agent tools. */
+  getBridge(): BrvBridge {
+    return this.bridge;
   }
-  return lines.join("\n\n");
 }
+
+// ---------------------------------------------------------------------------
+// Helpers — kept for `assemble`'s fallback path. The auto-curate-only
+// helpers (`serializeMessagesForCurate`, `extractSenderInfo`,
+// `stripAssistantTags`) are removed in v2; the agent now authors HTML
+// directly via the brv-curate tool.
+// ---------------------------------------------------------------------------
 
 /** Extract text from string content or ContentBlock[] arrays. */
 export function extractTextContent(content: unknown): string {
@@ -254,7 +224,7 @@ export function extractTextContent(content: unknown): string {
 }
 
 /**
- * Extract the latest user message text to use as the brv query.
+ * Extract the latest user message text to use as the brv recall query.
  * Strips OpenClaw metadata so brv receives only the actual question.
  */
 export function extractLatestUserQuery(messages: unknown[]): string | null {

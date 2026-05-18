@@ -1,7 +1,6 @@
 import type { PluginLogger } from "../src/types.js";
 import { describe, it, expect, vi } from "vitest";
-import { ByteRoverContextEngine } from "../src/context-engine.js";
-import { extractTextContent, extractLatestUserQuery } from "../src/context-engine.js";
+import { ByteRoverContextEngine, extractTextContent, extractLatestUserQuery } from "../src/context-engine.js";
 
 function makeLogger(): PluginLogger {
   return {
@@ -17,11 +16,12 @@ function makeLogger(): PluginLogger {
 // ---------------------------------------------------------------------------
 
 describe("ByteRoverContextEngine", () => {
-  it("has correct info fields", () => {
+  it("has correct info fields and reports v2", () => {
     const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
     expect(engine.info.id).toBe("byterover");
     expect(engine.info.name).toBe("ByteRover");
     expect(engine.info.ownsCompaction).toBe(false);
+    expect(engine.info.version).toBe("2.0.0");
   });
 
   it("ingest returns { ingested: false }", async () => {
@@ -43,7 +43,35 @@ describe("ByteRoverContextEngine", () => {
     expect(result.compacted).toBe(false);
   });
 
-  it("assemble returns messages pass-through when no prompt and no user messages", async () => {
+  // -------------------------------------------------------------------------
+  // afterTurn — no-op stub in v2; the agent invokes brv-curate directly
+  // -------------------------------------------------------------------------
+
+  it("afterTurn is a no-op and does NOT call the bridge", async () => {
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
+    // Spy on the bridge — must not be touched.
+    const persistSpy = vi.spyOn(engine["bridge"], "persistHtml").mockResolvedValue({
+      status: "ok",
+      filePath: "x.html",
+      topicPath: "x",
+      overwrote: false,
+    });
+
+    await engine.afterTurn({
+      sessionId: "s1",
+      sessionFile: "/tmp/s1.jsonl",
+      messages: [{ role: "user", content: "anything" }, { role: "assistant", content: "reply" }],
+      prePromptMessageCount: 0,
+    });
+
+    expect(persistSpy).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // assemble — guidance is injected every turn even when recall is skipped
+  // -------------------------------------------------------------------------
+
+  it("assemble injects curate guidance even with no prompt and no user messages", async () => {
     const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
     const messages = [{ role: "assistant", content: "hello" }] as unknown[];
     const result = await engine.assemble({
@@ -51,11 +79,13 @@ describe("ByteRoverContextEngine", () => {
       messages,
     });
     expect(result.messages).toBe(messages);
-    expect(result.estimatedTokens).toBe(0);
-    expect(result.systemPromptAddition).toBeUndefined();
+    expect(result.systemPromptAddition).toBeDefined();
+    expect(result.systemPromptAddition).toContain("<byterover-curate-guidance>");
+    // No recall happened, so no <byterover-context> block.
+    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
   });
 
-  it("assemble skips brv query for trivially short prompts", async () => {
+  it("assemble injects guidance-only when prompt is too short to query", async () => {
     const logger = makeLogger();
     const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, logger);
     const messages = [{ role: "user", content: "ok" }] as unknown[];
@@ -64,15 +94,13 @@ describe("ByteRoverContextEngine", () => {
       messages,
       prompt: "ok",
     });
-    expect(result.messages).toBe(messages);
-    expect(result.estimatedTokens).toBe(0);
-    expect(result.systemPromptAddition).toBeUndefined();
+    expect(result.systemPromptAddition).toContain("<byterover-curate-guidance>");
+    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
     expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("query too short"));
   });
 
-  it("assemble skips brv query for short prompts after metadata stripping", async () => {
-    const logger = makeLogger();
-    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, logger);
+  it("assemble skips recall after metadata stripping makes the prompt trivial", async () => {
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
     const prompt = [
       "Sender (untrusted metadata):",
       "```json",
@@ -85,8 +113,82 @@ describe("ByteRoverContextEngine", () => {
       messages: [],
       prompt,
     });
-    expect(result.systemPromptAddition).toBeUndefined();
-    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("query too short"));
+    expect(result.systemPromptAddition).toContain("<byterover-curate-guidance>");
+    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+  });
+
+  it("assemble combines recall + guidance when bridge.recall returns content", async () => {
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
+    vi.spyOn(engine["bridge"], "recall").mockResolvedValue({
+      content: "## Auth\nUse RS256.",
+      matchedDocs: [
+        { format: "html", path: "security/auth.md", rendered_md: "## Auth\nUse RS256.", score: 0.91, title: "Auth" },
+      ],
+    });
+
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages: [],
+      prompt: "How do we sign JWTs?",
+    });
+
+    expect(result.systemPromptAddition).toContain("<byterover-context>");
+    expect(result.systemPromptAddition).toContain("## Auth");
+    expect(result.systemPromptAddition).toContain("Use RS256.");
+    // Guidance block comes after the context block.
+    expect(result.systemPromptAddition).toContain("<byterover-curate-guidance>");
+    const ctxIdx = result.systemPromptAddition!.indexOf("<byterover-context>");
+    const guidanceIdx = result.systemPromptAddition!.indexOf("<byterover-curate-guidance>");
+    expect(guidanceIdx).toBeGreaterThan(ctxIdx);
+  });
+
+  it("assemble guidance-only when bridge.recall returns empty content", async () => {
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
+    vi.spyOn(engine["bridge"], "recall").mockResolvedValue({
+      content: "",
+      matchedDocs: [],
+    });
+
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages: [],
+      prompt: "an unmatched question with enough length",
+    });
+
+    expect(result.systemPromptAddition).toContain("<byterover-curate-guidance>");
+    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+  });
+
+  it("assemble degrades to guidance-only when bridge.recall throws", async () => {
+    const logger = makeLogger();
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, logger);
+    vi.spyOn(engine["bridge"], "recall").mockRejectedValue(new Error("daemon down"));
+
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages: [],
+      prompt: "a long enough query",
+    });
+
+    expect(result.systemPromptAddition).toContain("<byterover-curate-guidance>");
+    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("recall failed"));
+  });
+
+  // -------------------------------------------------------------------------
+  // guidance content — names the four core trigger conditions
+  // -------------------------------------------------------------------------
+
+  it("guidance names decisions, patterns, facts, and rules as trigger conditions", async () => {
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
+    const result = await engine.assemble({ sessionId: "s1", messages: [] });
+    const guidance = result.systemPromptAddition!;
+    expect(guidance).toContain("decisions");
+    expect(guidance).toContain("patterns");
+    expect(guidance).toContain("facts");
+    expect(guidance).toContain("rules");
+    expect(guidance).toContain("brv-curate");
+    expect(guidance).toContain("brv-query");
   });
 });
 
