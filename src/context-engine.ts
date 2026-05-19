@@ -8,66 +8,18 @@ import type {
 } from "./types.js";
 import { BrvBridge, type BrvBridgeConfig } from "@byterover/brv-bridge";
 import { stripUserMetadata, resolveWorkspaceDir } from "./message-utils.js";
+import { buildRecentMessagesBlock } from "./recent-messages-block.js";
 
 const CURATE_GUIDANCE = `<byterover-curate-guidance>
-You have access to brv-curate (for saving knowledge) and brv-query (for retrieving it).
+ByteRover surfaces curated project knowledge in the retrieved context block above (when relevant matches exist for the current prompt). Use it when answering — cite the curated decisions, rules, facts, or patterns rather than re-deriving them.
 
-# When to call brv-curate
+To save NEW knowledge into the context tree, the user runs \`brv curate "<their note>"\` from their terminal — that's the supported path right now. No brv-curate tool exists in this session.
 
-When your turn produces:
-  - decisions (architecture choices, library selections, design trade-offs)
-  - patterns (recurring code structures, error-handling conventions)
-  - facts (environment details, file locations, version info)
-  - rules (must-do / must-not-do constraints with rationale)
+If the user explicitly asks you to "save", "remember", or "curate" something, suggest they run:
 
-Skip when the turn was conversational, exploratory without conclusions, or covered material already in your retrieved context block above.
+  $ brv curate "<the thing to save>"
 
-# Quality bar — go BEYOND the literal assertion
-
-A 500-byte topic with one <bv-rule> + one <bv-reason> is too thin to be useful when retrieved months later. Aim for richer entries that future-you (or a teammate) can act on without re-asking the user.
-
-ALWAYS on <bv-topic>:
-  - summary="<one-line semantic, ~10-20 words>" — drives BM25 matching
-  - tags="<3-5 comma-separated>" — domain, technology, area
-  - keywords="<5-10 comma-separated>" — concrete terms a future query might use
-
-USE THE RIGHT CONTAINER (combine as relevant — most topics need 3-5 of these):
-  - <bv-decision> — chosen option + rationale
-  - <bv-rule severity="must|should"> — load-bearing constraint
-  - <bv-fact subject="X" category="environment|convention|project|...">  — concrete setup detail (version, path, port, account, key)
-  - <bv-files><li><code>src/x/y.ts</code></li>...</bv-files> — anchor topics to code paths so codebase queries match
-  - <bv-flow><h3>title</h3><ol><li>...</li></ol></bv-flow> — ordered procedures
-  - <bv-structure><h3>title</h3><ul>...</ul></bv-structure> — grouped state (file layouts, naming conventions)
-  - <bv-examples> — sample code or usage
-  - <bv-bug severity="..."> + <bv-fix> — incident runbook
-  - <bv-reason> at the end — the WHY this topic exists
-
-# meta field — always set summary + reason
-
-The meta envelope drives HITL surfacing in 'brv review pending'. Always supply:
-  - meta.summary — the one-line gist (mirrors <bv-topic summary>)
-  - meta.reason — one sentence on why this curation matters (shown to human reviewers)
-  - meta.impact — "high" for load-bearing decisions/rules/patterns; "low" for refinements
-  - meta.type — "ADD" for new path, "UPDATE" to replace existing, "MERGE" if combining with prior content
-  - meta.previousSummary — set only on UPDATE/MERGE; one-line of what existed before
-
-# Quick example
-
-A "we use RS256 for JWT signing" topic should look like:
-
-<bv-topic path="security/jwt_signing" title="JWT signing algorithm"
-  summary="RS256 chosen over HS256 — verifiers only need the public key."
-  tags="auth,jwt,security,signing"
-  keywords="jwt,rs256,asymmetric,public key,jwks,verifier,signing,algorithm">
-  <bv-decision id="d-rs256" severity="must">Use RS256 (asymmetric) for JWT signing across the project.</bv-decision>
-  <bv-rule severity="must">Verifiers MUST only hold the public key; the private key never leaves the issuer service.</bv-rule>
-  <bv-fact subject="jwks-endpoint" category="environment">JWKS published at /.well-known/jwks.json with 7-day overlap on key rotation.</bv-fact>
-  <bv-files><li><code>src/auth/jwt-signer.ts</code></li><li><code>src/auth/jwks-publisher.ts</code></li></bv-files>
-  <bv-reason>Locks the JWT signing algorithm; downstream verifier code and key-rotation policy depend on this choice.</bv-reason>
-</bv-topic>
-
-with meta:
-  { type: "ADD", impact: "high", reason: "Locks JWT signing; downstream verifier + key-rotation depend on it.", summary: "RS256 chosen for JWT signing over HS256." }
+…and offer to draft the exact text they should paste.
 </byterover-curate-guidance>`;
 
 /**
@@ -149,14 +101,33 @@ export class ByteRoverContextEngine implements ContextEngine {
       ? stripUserMetadata(rawPrompt).trim() || null
       : extractLatestUserQuery(params.messages);
 
+    // Top-5 recent conversational messages (excluding the current prompt,
+    // which is already shown to the agent as the actual user message slot).
+    // Empty string when no prior history exists — concat skips it cleanly.
+    const recentBlock = buildRecentMessagesBlock(params.messages, {
+      excludeLatest: rawPrompt !== null,
+    });
+
+    // Compose helper — order: context → recent messages → guidance.
+    // Recent-messages comes BEFORE guidance so the agent reads what just
+    // happened, then sees the rules for acting on it.
+    const composeAddition = (contextBlock?: string): string => {
+      const parts = [contextBlock, recentBlock, CURATE_GUIDANCE].filter(
+        (p): p is string => Boolean(p),
+      );
+      return parts.join("\n\n");
+    };
+
     // Build the systemPromptAddition. The curate-guidance block is included
     // EVERY turn — even when no recall content surfaces — so the agent
     // always knows the tools are available.
-    let systemPromptAddition: string | undefined = CURATE_GUIDANCE;
+    let systemPromptAddition: string | undefined = composeAddition();
 
     // Skip the recall network call when we have no usable query.
     if (!query) {
-      this.logger.debug?.("assemble skipped brv recall (no user message found)");
+      this.logger.debug?.(
+        "assemble skipped brv recall (no user message found)",
+      );
       return {
         messages: params.messages as AssembleResult["messages"],
         estimatedTokens: 0,
@@ -166,7 +137,9 @@ export class ByteRoverContextEngine implements ContextEngine {
 
     // Skip trivially short queries (e.g. "ok", "hi", "yes") — not worth a brv spawn.
     if (query.length < 5) {
-      this.logger.debug?.(`assemble skipped brv recall (query too short: "${query}")`);
+      this.logger.debug?.(
+        `assemble skipped brv recall (query too short: "${query}")`,
+      );
       return {
         messages: params.messages as AssembleResult["messages"],
         estimatedTokens: 0,
@@ -174,7 +147,8 @@ export class ByteRoverContextEngine implements ContextEngine {
       };
     }
 
-    const cwd = resolveWorkspaceDir(params.sessionKey, this.baseCwd) ?? this.baseCwd;
+    const cwd =
+      resolveWorkspaceDir(params.sessionKey, this.baseCwd) ?? this.baseCwd;
 
     // Abort-based deadline so we never exceed the agent ready timeout (15s).
     const ac = new AbortController();
@@ -185,7 +159,10 @@ export class ByteRoverContextEngine implements ContextEngine {
     );
 
     try {
-      const result = await this.bridge.recall(query, { signal: ac.signal, cwd });
+      const result = await this.bridge.recall(query, {
+        signal: ac.signal,
+        cwd,
+      });
 
       if (result.content) {
         const contextBlock =
@@ -193,12 +170,14 @@ export class ByteRoverContextEngine implements ContextEngine {
           `The following curated knowledge is from ByteRover context engine:\n\n` +
           `${result.content}\n` +
           `</byterover-context>`;
-        systemPromptAddition = `${contextBlock}\n\n${CURATE_GUIDANCE}`;
+        systemPromptAddition = composeAddition(contextBlock);
         this.logger.info(
-          `assemble injecting systemPromptAddition (${systemPromptAddition.length} chars: ${result.content.length} recall + guidance)`,
+          `assemble injecting systemPromptAddition (${systemPromptAddition.length} chars: context + recent${recentBlock ? " (with history)" : ""} + guidance)`,
         );
       } else {
-        this.logger.debug?.("assemble brv query returned empty result — guidance-only addition");
+        this.logger.debug?.(
+          "assemble brv query returned empty result — guidance + recent only",
+        );
       }
     } catch (err) {
       this.logger.warn(`recall failed (best-effort): ${String(err)}`);
@@ -239,14 +218,6 @@ export class ByteRoverContextEngine implements ContextEngine {
     this.logger.debug?.("dispose called");
   }
 
-  // ---------------------------------------------------------------------------
-  // Bridge accessor — used by index.ts so tools share the same instance
-  // ---------------------------------------------------------------------------
-
-  /** Internal accessor: lets the plugin's `register` share the bridge with the agent tools. */
-  getBridge(): BrvBridge {
-    return this.bridge;
-  }
 }
 
 // ---------------------------------------------------------------------------

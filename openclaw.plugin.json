@@ -3,9 +3,6 @@
   "kind": "context-engine",
   "name": "ByteRover",
   "description": "ByteRover context engine — curates and queries conversation context via brv CLI",
-  "contracts": {
-    "tools": ["brv-curate", "brv-query"]
-  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

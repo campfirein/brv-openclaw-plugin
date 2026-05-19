@@ -136,26 +136,6 @@ export interface ContextEngine {
 }
 
 // ---------------------------------------------------------------------------
-// Tool registration — openclaw/src/plugins/tool-types.ts
-// ---------------------------------------------------------------------------
-
-/**
- * Context passed to a tool factory per turn. Structurally compatible with
- * `OpenClawPluginToolContext` in openclaw-official; we use structural typing
- * so OpenClaw may add new fields without breaking compilation. We only read
- * `workspaceDir` (and fallback to `agentDir`); the rest stays opaque.
- */
-export type OpenClawPluginToolContext = {
-  config?: unknown;
-  runtimeConfig?: unknown;
-  workspaceDir?: string;
-  agentDir?: string;
-  agentId?: string;
-  sessionKey?: string;
-  sessionId?: string;
-};
-
-// ---------------------------------------------------------------------------
 // Plugin API — openclaw/src/plugins/types.ts → OpenClawPluginApi
 // ---------------------------------------------------------------------------
 
@@ -172,14 +152,5 @@ export type OpenClawPluginApi = {
   registerContextEngine(
     id: string,
     factory: () => ContextEngine | Promise<ContextEngine>,
-  ): void;
-  /**
-   * Register an agent-facing tool. The factory runs once per turn; the
-   * returned object must satisfy OpenClaw's `AnyAgentTool` shape
-   * (label, name, description, parameters, execute).
-   */
-  registerTool(
-    factory: (ctx: OpenClawPluginToolContext) => unknown,
-    opts: { name: string },
   ): void;
 };

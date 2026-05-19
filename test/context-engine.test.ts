@@ -44,7 +44,7 @@ describe("ByteRoverContextEngine", () => {
   });
 
   // -------------------------------------------------------------------------
-  // afterTurn — no-op stub in v2; the agent invokes brv-curate directly
+  // afterTurn — no-op stub; plugin is context-engine-only, no auto-curate
   // -------------------------------------------------------------------------
 
   it("afterTurn is a no-op and does NOT call the bridge", async () => {
@@ -175,19 +175,88 @@ describe("ByteRoverContextEngine", () => {
   });
 
   // -------------------------------------------------------------------------
-  // guidance content — names the four core trigger conditions
+  // assemble — recent-messages block
   // -------------------------------------------------------------------------
 
-  it("guidance names decisions, patterns, facts, and rules as trigger conditions", async () => {
+  it("assemble injects <byterover-recent-messages> when prior history exists", async () => {
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
+    vi.spyOn(engine["bridge"], "recall").mockResolvedValue({ content: "" });
+    const messages = [
+      { role: "user", content: "We discussed Postgres yesterday." },
+      { role: "assistant", content: "Yes, we agreed on RS256 too." },
+      { role: "user", content: "What's the test framework?" }, // current prompt
+    ] as unknown[];
+
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages,
+      prompt: "What's the test framework?",
+    });
+
+    expect(result.systemPromptAddition).toContain("<byterover-recent-messages>");
+    expect(result.systemPromptAddition).toContain("Postgres");
+    expect(result.systemPromptAddition).toContain("RS256");
+    // Current prompt is excluded — it's already the actual user message.
+    // The body of the recent-messages block should NOT repeat the current prompt's text:
+    const recentBody = result.systemPromptAddition!.match(/<byterover-recent-messages>([\s\S]*?)<\/byterover-recent-messages>/)?.[1] ?? "";
+    expect(recentBody).not.toContain("What's the test framework?");
+  });
+
+  it("assemble omits recent-messages block when there's no prior history", async () => {
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
+    vi.spyOn(engine["bridge"], "recall").mockResolvedValue({ content: "" });
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages: [{ role: "user", content: "first message" }] as unknown[],
+      prompt: "first message",
+    });
+    expect(result.systemPromptAddition).not.toContain("<byterover-recent-messages>");
+  });
+
+  it("assemble orders blocks: context → recent → guidance", async () => {
+    const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
+    vi.spyOn(engine["bridge"], "recall").mockResolvedValue({
+      content: "## Auth\nUse RS256.",
+      matchedDocs: [
+        { format: "html", path: "security/auth.md", rendered_md: "## Auth\nUse RS256.", score: 0.9, title: "Auth" },
+      ],
+    });
+
+    const messages = [
+      { role: "user", content: "earlier-discussion message" },
+      { role: "assistant", content: "earlier reply" },
+      { role: "user", content: "current question" },
+    ] as unknown[];
+
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages,
+      prompt: "current question",
+    });
+
+    const addition = result.systemPromptAddition!;
+    const contextIdx = addition.indexOf("<byterover-context>");
+    const recentIdx = addition.indexOf("<byterover-recent-messages>");
+    const guidanceIdx = addition.indexOf("<byterover-curate-guidance>");
+
+    expect(contextIdx).toBeGreaterThan(-1);
+    expect(recentIdx).toBeGreaterThan(contextIdx);
+    expect(guidanceIdx).toBeGreaterThan(recentIdx);
+  });
+
+  // -------------------------------------------------------------------------
+  // guidance content — points at the `brv curate` CLI, not an agent tool
+  // -------------------------------------------------------------------------
+
+  it("guidance describes retrieved-context usage and points at the brv CLI", async () => {
     const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
     const result = await engine.assemble({ sessionId: "s1", messages: [] });
     const guidance = result.systemPromptAddition!;
-    expect(guidance).toContain("decisions");
-    expect(guidance).toContain("patterns");
-    expect(guidance).toContain("facts");
-    expect(guidance).toContain("rules");
-    expect(guidance).toContain("brv-curate");
-    expect(guidance).toContain("brv-query");
+    expect(guidance).toContain("<byterover-curate-guidance>");
+    expect(guidance).toContain("retrieved context block above");
+    expect(guidance).toContain("brv curate");
+    // Should NOT advertise a brv-curate tool — no such tool registered in v2.0
+    expect(guidance).not.toMatch(/call brv-curate/);
   });
 });
 

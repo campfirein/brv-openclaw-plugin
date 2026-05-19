@@ -1,7 +1,7 @@
 {
   "name": "@byterover/byterover",
   "version": "2.0.0",
-  "description": "ByteRover context engine plugin for OpenClaw — curates and queries conversation context via brv CLI",
+  "description": "ByteRover context engine plugin for OpenClaw — recalls curated knowledge into the assemble system prompt via brv CLI",
   "type": "module",
   "main": "dist/index.js",
   "license": "Elastic-2.0",
@@ -25,14 +25,12 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@byterover/brv-bridge": "file:./byterover-brv-bridge-2.0.0.tgz",
-    "@sinclair/typebox": "^0.34.49"
+    "@byterover/brv-bridge": "file:./byterover-brv-bridge-2.0.0.tgz"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "zod": "^4.4.3"
+    "vitest": "^3.0.0"
   },
   "peerDependencies": {
     "openclaw": ">=2026.3.22"
