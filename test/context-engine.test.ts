@@ -49,7 +49,6 @@ describe("ByteRoverContextEngine", () => {
 
   it("afterTurn is a no-op and does NOT call the bridge", async () => {
     const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
-    // Spy on the bridge — must not be touched.
     const persistSpy = vi.spyOn(engine["bridge"], "persistHtml").mockResolvedValue({
       status: "ok",
       filePath: "x.html",

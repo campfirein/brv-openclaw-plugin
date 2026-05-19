@@ -12,15 +12,62 @@ import { stripUserMetadata, resolveWorkspaceDir } from "./message-utils.js";
 const CURATE_GUIDANCE = `<byterover-curate-guidance>
 You have access to brv-curate (for saving knowledge) and brv-query (for retrieving it).
 
-Call brv-curate when your turn produces:
+# When to call brv-curate
+
+When your turn produces:
   - decisions (architecture choices, library selections, design trade-offs)
   - patterns (recurring code structures, error-handling conventions)
   - facts (environment details, file locations, version info)
-  - rules (must-do or must-not-do constraints with rationale)
+  - rules (must-do / must-not-do constraints with rationale)
 
-Author a single <bv-topic> document capturing the knowledge. Use the bv-* element vocabulary described in the brv-curate tool's parameter schema. Set meta.impact to "high" for load-bearing decisions or rules that downstream code depends on.
+Skip when the turn was conversational, exploratory without conclusions, or covered material already in your retrieved context block above.
 
-Skip brv-curate when the turn was conversational, exploratory without conclusions, or covered material already in your retrieved context.
+# Quality bar — go BEYOND the literal assertion
+
+A 500-byte topic with one <bv-rule> + one <bv-reason> is too thin to be useful when retrieved months later. Aim for richer entries that future-you (or a teammate) can act on without re-asking the user.
+
+ALWAYS on <bv-topic>:
+  - summary="<one-line semantic, ~10-20 words>" — drives BM25 matching
+  - tags="<3-5 comma-separated>" — domain, technology, area
+  - keywords="<5-10 comma-separated>" — concrete terms a future query might use
+
+USE THE RIGHT CONTAINER (combine as relevant — most topics need 3-5 of these):
+  - <bv-decision> — chosen option + rationale
+  - <bv-rule severity="must|should"> — load-bearing constraint
+  - <bv-fact subject="X" category="environment|convention|project|...">  — concrete setup detail (version, path, port, account, key)
+  - <bv-files><li><code>src/x/y.ts</code></li>...</bv-files> — anchor topics to code paths so codebase queries match
+  - <bv-flow><h3>title</h3><ol><li>...</li></ol></bv-flow> — ordered procedures
+  - <bv-structure><h3>title</h3><ul>...</ul></bv-structure> — grouped state (file layouts, naming conventions)
+  - <bv-examples> — sample code or usage
+  - <bv-bug severity="..."> + <bv-fix> — incident runbook
+  - <bv-reason> at the end — the WHY this topic exists
+
+# meta field — always set summary + reason
+
+The meta envelope drives HITL surfacing in 'brv review pending'. Always supply:
+  - meta.summary — the one-line gist (mirrors <bv-topic summary>)
+  - meta.reason — one sentence on why this curation matters (shown to human reviewers)
+  - meta.impact — "high" for load-bearing decisions/rules/patterns; "low" for refinements
+  - meta.type — "ADD" for new path, "UPDATE" to replace existing, "MERGE" if combining with prior content
+  - meta.previousSummary — set only on UPDATE/MERGE; one-line of what existed before
+
+# Quick example
+
+A "we use RS256 for JWT signing" topic should look like:
+
+<bv-topic path="security/jwt_signing" title="JWT signing algorithm"
+  summary="RS256 chosen over HS256 — verifiers only need the public key."
+  tags="auth,jwt,security,signing"
+  keywords="jwt,rs256,asymmetric,public key,jwks,verifier,signing,algorithm">
+  <bv-decision id="d-rs256" severity="must">Use RS256 (asymmetric) for JWT signing across the project.</bv-decision>
+  <bv-rule severity="must">Verifiers MUST only hold the public key; the private key never leaves the issuer service.</bv-rule>
+  <bv-fact subject="jwks-endpoint" category="environment">JWKS published at /.well-known/jwks.json with 7-day overlap on key rotation.</bv-fact>
+  <bv-files><li><code>src/auth/jwt-signer.ts</code></li><li><code>src/auth/jwks-publisher.ts</code></li></bv-files>
+  <bv-reason>Locks the JWT signing algorithm; downstream verifier code and key-rotation policy depend on this choice.</bv-reason>
+</bv-topic>
+
+with meta:
+  { type: "ADD", impact: "high", reason: "Locks JWT signing; downstream verifier + key-rotation depend on it.", summary: "RS256 chosen for JWT signing over HS256." }
 </byterover-curate-guidance>`;
 
 /**
