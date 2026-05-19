@@ -116,7 +116,12 @@ describe("ByteRoverContextEngine integration (v2)", () => {
     });
 
     it("falls back to extracting query from messages when no prompt", async () => {
-      mockRecall.mockResolvedValue({ content: "relevant context" });
+      mockRecall.mockResolvedValue({
+        content: "relevant context",
+        matchedDocs: [
+          { format: "html", path: "x.md", rendered_md: "relevant context", score: 0.9, title: "X" },
+        ],
+      });
       const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
 
       const messages = [
@@ -132,7 +137,7 @@ describe("ByteRoverContextEngine integration (v2)", () => {
     });
 
     it("injects guidance-only (no context block) when recall returns empty content", async () => {
-      mockRecall.mockResolvedValue({ content: "" });
+      mockRecall.mockResolvedValue({ content: "", matchedDocs: [] });
       const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
 
       const result = await engine.assemble({

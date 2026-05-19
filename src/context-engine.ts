@@ -11,15 +11,38 @@ import { stripUserMetadata, resolveWorkspaceDir } from "./message-utils.js";
 import { buildRecentMessagesBlock } from "./recent-messages-block.js";
 
 const CURATE_GUIDANCE = `<byterover-curate-guidance>
-ByteRover surfaces curated project knowledge in the retrieved context block above (when relevant matches exist for the current prompt). Use it when answering — cite the curated decisions, rules, facts, or patterns rather than re-deriving them.
+# REQUIRED per-turn workflow — DO NOT SKIP
 
-To save NEW knowledge into the context tree, the user runs \`brv curate "<their note>"\` from their terminal — that's the supported path right now. No brv-curate tool exists in this session.
+Every turn proceeds in this order. The curate step is MANDATORY when the condition fires; skipping it is a defect, not a judgment call.
 
-If the user explicitly asks you to "save", "remember", or "curate" something, suggest they run:
+1. ANSWER the user's question. Cite the retrieved context block above whenever it covers the question.
 
-  $ brv curate "<the thing to save>"
+2. EVALUATE (silently, in your reasoning): did the retrieved retrieved context block already contain what the user was asking about?
 
-…and offer to draft the exact text they should paste.
+3. CURATE — MANDATORY when the answer above is NO. The user expects ByteRover to learn from this conversation; that only happens if you save new knowledge now. Run \`brv curate\` via your shell / code-execution tool. Two calls in sequence (do NOT stop after the first):
+
+   Call 1 — kickoff:
+     brv curate "<a paragraph describing the knowledge you just gave the user>" --format json
+   Parse the response JSON; extract data.sessionId.
+
+   Call 2 — continuation (write the topic):
+     brv curate --session <sessionId> --response '<json-envelope>' --format json
+
+   where <json-envelope> is:
+     {"html":"<bv-topic path=\\"...\\" title=\\"...\\" summary=\\"...\\">...</bv-topic>","meta":{"type":"ADD","impact":"high","reason":"...","summary":"..."}}
+
+   On status "validation-failed": re-author the HTML and re-run Call 2 with the SAME sessionId.
+
+# When NOT to curate
+
+- Pure conversational filler (greetings, acknowledgments) — skip.
+- The retrieved context block already covered the answer — skip; no new knowledge to save.
+
+# HTML schema reminder (inside <bv-topic>)
+
+Required: path="<domain>/<topic>" (snake_case), title.
+Recommended: summary, tags, keywords (drive BM25 retrieval).
+Body — combine 3-5 of: <bv-decision>, <bv-rule severity="must|should">, <bv-fact subject category>, <bv-files><li><code>...</code></li></bv-files>, <bv-structure><h3>...</h3><ul>...</ul></bv-structure>, <bv-examples>, <bv-bug>+<bv-fix>, <bv-reason> at the end.
 </byterover-curate-guidance>`;
 
 /**
@@ -217,7 +240,6 @@ export class ByteRoverContextEngine implements ContextEngine {
     await this.bridge.shutdown();
     this.logger.debug?.("dispose called");
   }
-
 }
 
 // ---------------------------------------------------------------------------
