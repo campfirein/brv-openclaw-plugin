@@ -1,11 +1,13 @@
-import type { OpenClawPluginApi } from "./src/types.js";
 import type { BrvBridgeConfig } from "@byterover/brv-bridge";
+
 import { ByteRoverContextEngine } from "./src/context-engine.js";
+import type { OpenClawPluginApi } from "./src/types.js";
 
 const byteRoverPlugin = {
   id: "byterover",
   name: "ByteRover",
-  description: "ByteRover context engine — curates and queries conversation context via brv CLI",
+  description:
+    "ByteRover context engine — recall curated knowledge into the assemble system prompt; curate via the `brv curate` CLI.",
   kind: "context-engine" as const,
   register(api: OpenClawPluginApi) {
     const pluginConfig = (api.pluginConfig ?? {}) as Record<string, unknown>;
@@ -21,7 +23,7 @@ const byteRoverPlugin = {
 
     api.registerContextEngine("byterover", () => new ByteRoverContextEngine(bridgeConfig, api.logger));
 
-    api.logger.info("[byterover] Plugin loaded");
+    api.logger.info("[byterover] Plugin loaded (context-engine only)");
   },
 };
 

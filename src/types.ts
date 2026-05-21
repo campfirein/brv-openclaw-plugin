@@ -153,9 +153,4 @@ export type OpenClawPluginApi = {
     id: string,
     factory: () => ContextEngine | Promise<ContextEngine>,
   ): void;
-  /** Register an agent-facing tool. */
-  registerTool(
-    factory: (ctx: { sessionKey: string }) => unknown,
-    opts: { name: string },
-  ): void;
 };

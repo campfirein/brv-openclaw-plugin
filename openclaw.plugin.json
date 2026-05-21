@@ -2,7 +2,7 @@
   "id": "byterover",
   "kind": "context-engine",
   "name": "ByteRover",
-  "description": "ByteRover context engine — curates and queries conversation context via brv CLI",
+  "description": "ByteRover context engine — recalls curated knowledge into the assemble system prompt; agent invokes `brv curate` via its shell/code-exec tool to save new knowledge.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
