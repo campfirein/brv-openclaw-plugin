@@ -6,12 +6,13 @@ import type {
   IngestResult,
   PluginLogger,
 } from "./types.js";
+import { dirname } from "node:path";
 import {
   resolveRecallScript,
   spawnRecall,
   type RecallSpawnConfig,
 } from "./recall-spawn.js";
-import { CURATE_GUIDANCE } from "./curate-guidance.js";
+import { buildCurateGuidance } from "./curate-guidance.js";
 import { resolveWorkspaceDir, stripUserMetadata, extractTextContent } from "./message-utils.js";
 
 /**
@@ -72,6 +73,14 @@ export class ByteRoverContextEngine implements ContextEngine {
   private readonly recallLimit: number;
   private readonly assembleDeadlineMs: number;
   private readonly recallConfig: RecallSpawnConfig;
+  /**
+   * Sibling-of-recall.mjs path used to compose the `node …/record.mjs …`
+   * invocations baked into the curate guidance. Resolved once at construction
+   * time from the plugin's recallScript config so the guidance shows the
+   * exact path this user's agent should run, no hardcoded paths.
+   */
+  private readonly scriptsDir: string;
+  private readonly curateGuidance: string;
 
   constructor(config: ByteRoverPluginConfig, logger: PluginLogger) {
     this.logger = logger;
@@ -83,9 +92,12 @@ export class ByteRoverContextEngine implements ContextEngine {
       recallScript: config.recallScript,
       timeoutMs: this.assembleDeadlineMs,
     };
+    this.scriptsDir = dirname(resolveRecallScript(this.recallConfig));
+    this.curateGuidance = buildCurateGuidance({ scriptsDir: this.scriptsDir });
     this.logger.debug?.(
       `[byterover] mono engine ready (recall=${resolveRecallScript(this.recallConfig)}, ` +
-        `timeoutMs=${this.assembleDeadlineMs}, limit=${this.recallLimit})`,
+        `timeoutMs=${this.assembleDeadlineMs}, limit=${this.recallLimit}, ` +
+        `scriptsDir=${this.scriptsDir})`,
     );
   }
 
@@ -152,7 +164,10 @@ export class ByteRoverContextEngine implements ContextEngine {
       );
     }
 
-    const systemPromptAddition = buildSystemPromptAddition(retrievedContent);
+    const systemPromptAddition = buildSystemPromptAddition(
+      retrievedContent,
+      this.curateGuidance,
+    );
     return {
       messages: params.messages as AssembleResult["messages"],
       estimatedTokens: 0,
@@ -211,18 +226,45 @@ export class ByteRoverContextEngine implements ContextEngine {
  * Compose the system-prompt addition that openclaw inlines into the host LLM
  * call. Always returns a string — the curate-guidance block is injected even
  * when recall produced nothing, so the agent always knows how to record.
+ *
+ * When there IS retrieved content, we wrap it with directive language so the
+ * model treats it as authoritative project knowledge to BUILD ON, not just
+ * reading material to acknowledge. Earlier wording ("The following curated
+ * knowledge is from ByteRover") was too passive — models read it and moved
+ * on. The new wrapper tells the model what to DO with the content.
+ *
+ * The curate-guidance argument is pre-rendered with the user's resolved
+ * scripts dir (see `ByteRoverContextEngine.curateGuidance`); we just append
+ * it.
  */
-export function buildSystemPromptAddition(retrievedContent: string): string {
+export function buildSystemPromptAddition(
+  retrievedContent: string,
+  curateGuidance: string,
+): string {
   if (retrievedContent && retrievedContent.trim()) {
     return (
       `<byterover-context>\n` +
-      `The following curated knowledge is from ByteRover:\n\n` +
+      `# Project knowledge retrieved from ByteRover (authoritative — use it)\n\n` +
+      `The topics below are facts, decisions, and rules the user's team has\n` +
+      `already curated for this project. Treat them as the ground truth for\n` +
+      `anything they cover.\n\n` +
+      `**Instructions for using this context:**\n` +
+      `1. READ each <bv-topic> before drafting your answer.\n` +
+      `2. ALIGN your answer with the decisions and rules you find here — if a\n` +
+      `   <bv-rule severity="must"> exists for the topic, do not contradict it.\n` +
+      `3. CITE the topic path (e.g. "per security/auth") when your answer relies\n` +
+      `   on retrieved knowledge, so the user can verify it.\n` +
+      `4. SUPPLEMENT — don't duplicate. If the context already covers the\n` +
+      `   question, lean on it; don't re-derive from scratch.\n` +
+      `5. FLAG conflicts. If the user's request contradicts a retrieved rule,\n` +
+      `   surface the conflict explicitly rather than silently overriding.\n\n` +
+      `---\n\n` +
       `${retrievedContent}\n` +
       `</byterover-context>\n\n` +
-      CURATE_GUIDANCE
+      curateGuidance
     );
   }
-  return CURATE_GUIDANCE;
+  return curateGuidance;
 }
 
 /**

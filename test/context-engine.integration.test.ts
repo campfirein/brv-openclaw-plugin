@@ -133,7 +133,7 @@ describe("ByteRoverContextEngine integration", () => {
       prompt: "Tell me about TS config",
     });
 
-    expect(result.systemPromptAddition).toContain("<byterover-context>");
+    expect(result.systemPromptAddition).toContain("# Project knowledge retrieved from ByteRover");
     expect(result.systemPromptAddition).toContain("User prefers TypeScript with strict mode.");
     expect(result.systemPromptAddition).toContain("q=Tell me about TS config");
     expect(result.systemPromptAddition).toContain(`cwd=${tmpDir}`);
@@ -154,7 +154,7 @@ describe("ByteRoverContextEngine integration", () => {
       prompt: "obscure topic",
     });
 
-    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(result.systemPromptAddition).not.toContain("# Project knowledge retrieved from ByteRover");
     expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
   });
 
@@ -172,7 +172,7 @@ describe("ByteRoverContextEngine integration", () => {
       prompt: "tell me about config",
     });
 
-    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(result.systemPromptAddition).not.toContain("# Project knowledge retrieved from ByteRover");
     expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
   });
 
@@ -189,7 +189,7 @@ describe("ByteRoverContextEngine integration", () => {
       prompt: "tell me about config",
     });
 
-    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(result.systemPromptAddition).not.toContain("# Project knowledge retrieved from ByteRover");
     expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
   });
 
@@ -206,7 +206,7 @@ describe("ByteRoverContextEngine integration", () => {
       prompt: "tell me about config",
     });
 
-    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(result.systemPromptAddition).not.toContain("# Project knowledge retrieved from ByteRover");
     expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining("recall script not found"),
@@ -228,7 +228,7 @@ describe("ByteRoverContextEngine integration", () => {
     });
     const elapsed = Date.now() - start;
 
-    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(result.systemPromptAddition).not.toContain("# Project knowledge retrieved from ByteRover");
     expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
     // Sanity: the timeout fires well before the assemble deadline cap.
     expect(elapsed).toBeLessThan(2_000);
@@ -250,7 +250,7 @@ describe("ByteRoverContextEngine integration", () => {
       prompt: "tell me about config",
     });
 
-    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(result.systemPromptAddition).not.toContain("# Project knowledge retrieved from ByteRover");
     expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
   });
 

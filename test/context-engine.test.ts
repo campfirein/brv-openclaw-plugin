@@ -81,7 +81,7 @@ describe("ByteRoverContextEngine", () => {
     // agent always knows how to record. No retrieved content here (no query).
     expect(result.systemPromptAddition).toBeDefined();
     expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
-    expect(result.systemPromptAddition).not.toContain("byterover-context");
+    expect(result.systemPromptAddition).not.toContain("# Project knowledge retrieved from ByteRover");
   });
 
   it("assemble skips recall for trivially short prompts but still emits guidance", async () => {
@@ -93,7 +93,7 @@ describe("ByteRoverContextEngine", () => {
     const messages = [{ role: "user", content: "ok" }] as unknown[];
     const result = await engine.assemble({ sessionId: "s1", messages, prompt: "ok" });
     expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
-    expect(result.systemPromptAddition).not.toContain("byterover-context");
+    expect(result.systemPromptAddition).not.toContain("# Project knowledge retrieved from ByteRover");
     expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("query too short"));
   });
 
@@ -122,21 +122,21 @@ describe("ByteRoverContextEngine", () => {
 
 describe("buildSystemPromptAddition", () => {
   it("returns curate guidance only when retrieved content is empty", () => {
-    const out = buildSystemPromptAddition("");
+    const out = buildSystemPromptAddition("", "<byterover-curate-guidance>STUB</byterover-curate-guidance>");
     expect(out).toContain("byterover-curate-guidance");
-    expect(out).not.toContain("byterover-context");
+    expect(out).not.toContain("# Project knowledge retrieved from ByteRover");
   });
 
   it("returns context block + curate guidance when content is present", () => {
-    const out = buildSystemPromptAddition(`<bv-topic path="x" title="X"></bv-topic>`);
-    expect(out).toContain("<byterover-context>");
+    const out = buildSystemPromptAddition(`<bv-topic path="x" title="X"></bv-topic>`, "<byterover-curate-guidance>STUB</byterover-curate-guidance>");
+    expect(out).toContain("# Project knowledge retrieved from ByteRover");
     expect(out).toContain(`<bv-topic path="x"`);
     expect(out).toContain("byterover-curate-guidance");
   });
 
   it("treats whitespace-only content as empty", () => {
-    const out = buildSystemPromptAddition("   \n  \t  ");
-    expect(out).not.toContain("byterover-context");
+    const out = buildSystemPromptAddition("   \n  \t  ", "<byterover-curate-guidance>STUB</byterover-curate-guidance>");
+    expect(out).not.toContain("# Project knowledge retrieved from ByteRover");
     expect(out).toContain("byterover-curate-guidance");
   });
 });
