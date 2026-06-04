@@ -196,6 +196,28 @@ export function stripAssistantTags(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// extractTextContent
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract text from string content or ContentBlock[] arrays. Matches the
+ * helper that lived inline in the cli-flavored context-engine; hoisted here
+ * so the mono-flavored engine and any future helpers can share it.
+ */
+export function extractTextContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .filter((b: unknown) => (b as { type?: string }).type === "text")
+      .map((b: unknown) => (b as { text: string }).text)
+      .join("\n");
+  }
+  return "";
+}
+
+// ---------------------------------------------------------------------------
 // sessionKey utilities
 // ---------------------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 {
   "name": "@byterover/byterover",
-  "version": "1.1.8",
-  "description": "ByteRover context engine plugin for OpenClaw — curates and queries conversation context via brv CLI",
+  "version": "3.0.0-mono.0",
+  "description": "ByteRover context engine plugin for OpenClaw (mono build) — recalls curated knowledge into the assemble system prompt via the byterover-mono recall.mjs script; agent invokes record.mjs via its shell/code-exec tool to save new knowledge.",
   "type": "module",
   "main": "dist/index.js",
   "license": "Elastic-2.0",
@@ -10,6 +10,7 @@
     "openclaw",
     "openclaw-plugin",
     "byterover",
+    "byterover-mono",
     "context-engine"
   ],
   "scripts": {
@@ -24,9 +25,7 @@
     "README.md",
     "LICENSE"
   ],
-  "dependencies": {
-    "@byterover/brv-bridge": "^1.0.2"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",

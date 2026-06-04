@@ -1,32 +1,22 @@
-import type { PluginLogger } from "../src/types.js";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+/**
+ * Integration tests — exercise the engine end-to-end with a real spawn against
+ * a tiny fake `recall.mjs` placed in a temp dir. Mocks the openclaw.json read
+ * so resolveWorkspaceDir's lookup doesn't leak the developer's config.
+ *
+ * The fake recall script honours the same CLI contract as
+ * `byterover-mono/packages/skill-runtime/src/entries/recall.ts` — it accepts
+ * positional `<query>` and flags `--cwd`, `--limit`, and emits the same
+ * `{ ok, data: { content, matchedDocs } }` envelope on stdout. That way the
+ * subprocess pipeline (spawn → JSON parse → coerce) is exercised verbatim;
+ * only the engine that produces the envelope is faked.
+ */
+
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ByteRoverContextEngine } from "../src/context-engine.js";
-
-// ---------------------------------------------------------------------------
-// Mock @byterover/brv-bridge so no real CLI is spawned
-// ---------------------------------------------------------------------------
-
-const mockRecall = vi.fn();
-const mockPersist = vi.fn();
-const mockShutdown = vi.fn();
-
-vi.mock("@byterover/brv-bridge", () => ({
-  BrvBridge: vi.fn().mockImplementation(() => ({
-    recall: mockRecall,
-    persist: mockPersist,
-    shutdown: mockShutdown,
-    ready: vi.fn().mockResolvedValue(true),
-  })),
-}));
-
-// ---------------------------------------------------------------------------
-// Mock node:fs so resolveWorkspaceDir's read of ~/.openclaw/openclaw.json
-// doesn't leak the developer's actual config into the test.
-// Throwing for that path forces resolveWorkspaceDir into its legacy fallback,
-// which the cwd-override assertion below was written against.
-// Pass-through for any other readFileSync call so unrelated fs operations
-// (vitest's own internals, source-map loaders, etc.) still work.
-// ---------------------------------------------------------------------------
+import type { PluginLogger } from "../src/types.js";
 
 vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -52,180 +42,238 @@ function makeLogger(): PluginLogger {
 }
 
 // ---------------------------------------------------------------------------
-// Integration tests — assemble → bridge.recall with mocked bridge
+// Fake recall.mjs helpers
+// ---------------------------------------------------------------------------
+
+function writeFakeRecall(dir: string, body: string): string {
+  const path = join(dir, "recall.mjs");
+  writeFileSync(path, body, { mode: 0o755 });
+  return path;
+}
+
+/**
+ * Script body that prints a fixed JSON envelope and exits 0. The first
+ * positional arg is the query — we echo it back inside the content so tests
+ * can assert query passthrough. cwd is captured too.
+ */
+function happyRecallScript(matched: Array<{
+  path: string;
+  title: string;
+  score: number;
+  snippet: string;
+}>): string {
+  return [
+    "#!/usr/bin/env node",
+    "const args = process.argv.slice(2);",
+    "const query = args[0] ?? '';",
+    "const cwdIdx = args.indexOf('--cwd');",
+    "const cwd = cwdIdx !== -1 ? args[cwdIdx + 1] : '';",
+    `const matched = ${JSON.stringify(matched)};`,
+    "const content = matched.length",
+    "  ? matched.map(d => `<bv-topic path=\"${d.path}\" title=\"${d.title}\">${d.snippet} (q=${query}; cwd=${cwd})</bv-topic>`).join('\\n\\n---\\n\\n')",
+    "  : '';",
+    "process.stdout.write(JSON.stringify({ ok: true, data: { content, matchedDocs: matched } }));",
+    "",
+  ].join("\n");
+}
+
+/** Recall script that throws — used to assert best-effort behavior. */
+const throwingRecallScript = `#!/usr/bin/env node\nprocess.stderr.write('recall blew up\\n');\nprocess.exit(1);\n`;
+
+/** Recall script that emits malformed JSON. */
+const malformedRecallScript = `#!/usr/bin/env node\nprocess.stdout.write('not json at all');\n`;
+
+/** Recall script that hangs forever (tests timeout). */
+const hangingRecallScript = `#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n`;
+
+// ---------------------------------------------------------------------------
+// Test setup
+// ---------------------------------------------------------------------------
+
+let tmpDir: string;
+
+beforeEach(() => {
+  tmpDir = mkdtempSync(join(tmpdir(), "byterover-plugin-integ-"));
+});
+
+afterEach(() => {
+  try {
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+  vi.clearAllMocks();
+});
+
+// ---------------------------------------------------------------------------
+// Tests
 // ---------------------------------------------------------------------------
 
 describe("ByteRoverContextEngine integration", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  it("assemble: real spawn → JSON envelope → systemPromptAddition with both blocks", async () => {
+    const recallScript = writeFakeRecall(
+      tmpDir,
+      happyRecallScript([
+        {
+          path: "ts/strict.html",
+          title: "TS strict mode",
+          score: 7.2,
+          snippet: "User prefers TypeScript with strict mode.",
+        },
+      ]),
+    );
+    const engine = new ByteRoverContextEngine(
+      { cwd: tmpDir, recallScript },
+      makeLogger(),
+    );
+
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages: [{ role: "user", content: "Tell me about TS config" }] as unknown[],
+      prompt: "Tell me about TS config",
+    });
+
+    expect(result.systemPromptAddition).toContain("<byterover-context>");
+    expect(result.systemPromptAddition).toContain("User prefers TypeScript with strict mode.");
+    expect(result.systemPromptAddition).toContain("q=Tell me about TS config");
+    expect(result.systemPromptAddition).toContain(`cwd=${tmpDir}`);
+    expect(result.systemPromptAddition).toContain("</byterover-context>");
+    expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
   });
 
-  // -------------------------------------------------------------------------
-  // assemble → bridge.recall
-  // -------------------------------------------------------------------------
+  it("assemble: empty matched docs → no context block, but curate guidance still ships", async () => {
+    const recallScript = writeFakeRecall(tmpDir, happyRecallScript([]));
+    const engine = new ByteRoverContextEngine(
+      { cwd: tmpDir, recallScript },
+      makeLogger(),
+    );
 
-  describe("assemble → bridge.recall", () => {
-    it("calls recall with cleaned prompt and injects systemPromptAddition", async () => {
-      mockRecall.mockResolvedValue({
-        content: "User prefers TypeScript with strict mode.",
-      });
-      const logger = makeLogger();
-      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, logger);
-      const messages = [{ role: "user", content: "Tell me about TS config" }] as unknown[];
-
-      const result = await engine.assemble({
-        sessionId: "s1",
-        messages,
-        prompt: "Tell me about TS config",
-      });
-
-      expect(mockRecall).toHaveBeenCalledOnce();
-      const call = mockRecall.mock.calls[0];
-      expect(call[0]).toBe("Tell me about TS config");
-      expect(call[1]).toHaveProperty("signal");
-
-      expect(result.systemPromptAddition).toContain("<byterover-context>");
-      expect(result.systemPromptAddition).toContain("User prefers TypeScript with strict mode.");
-      expect(result.systemPromptAddition).toContain("</byterover-context>");
-      expect(result.messages).toBe(messages);
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages: [],
+      prompt: "obscure topic",
     });
 
-    it("strips metadata from prompt before querying", async () => {
-      mockRecall.mockResolvedValue({ content: "some context" });
-      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
-
-      const prompt = [
-        "Sender (untrusted metadata):",
-        "```json",
-        '{"name": "Bob"}',
-        "```",
-        "How do I configure plugins?",
-      ].join("\n");
-
-      await engine.assemble({
-        sessionId: "s1",
-        messages: [],
-        prompt,
-      });
-
-      const query = mockRecall.mock.calls[0][0];
-      expect(query).toBe("How do I configure plugins?");
-      expect(query).not.toContain("untrusted metadata");
-    });
-
-    it("falls back to extracting query from messages when no prompt", async () => {
-      mockRecall.mockResolvedValue({ content: "relevant context" });
-      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
-
-      const messages = [
-        { role: "assistant", content: "Hello!" },
-        { role: "user", content: "What are context engines?" },
-      ] as unknown[];
-
-      const result = await engine.assemble({ sessionId: "s1", messages });
-
-      const query = mockRecall.mock.calls[0][0];
-      expect(query).toBe("What are context engines?");
-      expect(result.systemPromptAddition).toContain("relevant context");
-    });
-
-    it("returns no systemPromptAddition when recall returns empty content", async () => {
-      mockRecall.mockResolvedValue({ content: "" });
-      const logger = makeLogger();
-      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, logger);
-
-      const result = await engine.assemble({
-        sessionId: "s1",
-        messages: [{ role: "user", content: "some question here" }] as unknown[],
-        prompt: "some question here",
-      });
-
-      expect(result.systemPromptAddition).toBeUndefined();
-      expect(logger.debug).toHaveBeenCalledWith("assemble brv query returned empty result");
-    });
-
-    it("returns no systemPromptAddition when recall throws", async () => {
-      mockRecall.mockRejectedValue(new Error("connection refused"));
-      const logger = makeLogger();
-      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, logger);
-
-      const result = await engine.assemble({
-        sessionId: "s1",
-        messages: [],
-        prompt: "a valid question",
-      });
-
-      expect(result.systemPromptAddition).toBeUndefined();
-    });
-
-    it("passes cwd override from resolveWorkspaceDir", async () => {
-      mockRecall.mockResolvedValue({ content: "answer" });
-      const engine = new ByteRoverContextEngine({ cwd: "/base/dir" }, makeLogger());
-
-      await engine.assemble({
-        sessionId: "s1",
-        sessionKey: "agent:sub1:channel",
-        messages: [],
-        prompt: "a valid question",
-      });
-
-      const options = mockRecall.mock.calls[0][1];
-      expect(options.cwd).toBe("/base/dir-sub1");
-    });
+    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
   });
 
-  // -------------------------------------------------------------------------
-  // afterTurn → bridge.persist
-  // -------------------------------------------------------------------------
+  it("assemble: subprocess throws → engine falls back to empty content, guidance still ships", async () => {
+    const recallScript = writeFakeRecall(tmpDir, throwingRecallScript);
+    const logger = makeLogger();
+    const engine = new ByteRoverContextEngine(
+      { cwd: tmpDir, recallScript },
+      logger,
+    );
 
-  describe("afterTurn → bridge.persist", () => {
-    it("calls persist with serialized conversation", async () => {
-      mockPersist.mockResolvedValue({ status: "queued" });
-      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
-
-      const messages = [
-        { role: "user", content: "What is ByteRover?" },
-        { role: "assistant", content: "ByteRover is a context engine." },
-      ] as unknown[];
-
-      await engine.afterTurn({
-        sessionId: "s1",
-        sessionFile: "/tmp/s1.jsonl",
-        messages,
-        prePromptMessageCount: 0,
-      });
-
-      expect(mockPersist).toHaveBeenCalledOnce();
-      const context = mockPersist.mock.calls[0][0];
-      expect(context).toContain("What is ByteRover?");
-      expect(context).toContain("ByteRover is a context engine.");
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages: [],
+      prompt: "tell me about config",
     });
 
-    it("skips heartbeat turns", async () => {
-      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
+    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
+  });
 
-      await engine.afterTurn({
-        sessionId: "s1",
-        sessionFile: "/tmp/s1.jsonl",
-        messages: [{ role: "user", content: "hi" }] as unknown[],
-        prePromptMessageCount: 0,
-        isHeartbeat: true,
-      });
+  it("assemble: malformed JSON → engine falls back to empty content", async () => {
+    const recallScript = writeFakeRecall(tmpDir, malformedRecallScript);
+    const engine = new ByteRoverContextEngine(
+      { cwd: tmpDir, recallScript },
+      makeLogger(),
+    );
 
-      expect(mockPersist).not.toHaveBeenCalled();
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages: [],
+      prompt: "tell me about config",
     });
 
-    it("skips when no new messages", async () => {
-      const engine = new ByteRoverContextEngine({ cwd: "/tmp/test" }, makeLogger());
+    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
+  });
 
-      await engine.afterTurn({
-        sessionId: "s1",
-        sessionFile: "/tmp/s1.jsonl",
-        messages: [{ role: "user", content: "old" }] as unknown[],
-        prePromptMessageCount: 1,
-      });
+  it("assemble: missing recallScript path → empty content, guidance still ships, warn logged", async () => {
+    const logger = makeLogger();
+    const engine = new ByteRoverContextEngine(
+      { cwd: tmpDir, recallScript: join(tmpDir, "does-not-exist.mjs") },
+      logger,
+    );
 
-      expect(mockPersist).not.toHaveBeenCalled();
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages: [],
+      prompt: "tell me about config",
     });
+
+    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("recall script not found"),
+    );
+  });
+
+  it("assemble: timeout fires → empty content, guidance still ships", async () => {
+    const recallScript = writeFakeRecall(tmpDir, hangingRecallScript);
+    const engine = new ByteRoverContextEngine(
+      { cwd: tmpDir, recallScript, recallTimeoutMs: 250 },
+      makeLogger(),
+    );
+
+    const start = Date.now();
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages: [],
+      prompt: "tell me about config",
+    });
+    const elapsed = Date.now() - start;
+
+    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
+    // Sanity: the timeout fires well before the assemble deadline cap.
+    expect(elapsed).toBeLessThan(2_000);
+  }, 5_000);
+
+  it("assemble: no cwd configured → still emits curate guidance (recall is best-effort)", async () => {
+    // Note: resolveWorkspaceDir falls back to ~/.openclaw/workspace when
+    // baseCwd is undefined, so recall will still spawn but against a path
+    // that likely has no .brv tree. Either way, guidance always ships.
+    const recallScript = writeFakeRecall(tmpDir, happyRecallScript([]));
+    const engine = new ByteRoverContextEngine(
+      { recallScript },
+      makeLogger(),
+    );
+
+    const result = await engine.assemble({
+      sessionId: "s1",
+      messages: [],
+      prompt: "tell me about config",
+    });
+
+    expect(result.systemPromptAddition).not.toContain("<byterover-context>");
+    expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
+  });
+
+  it("ingest is a no-op (mono has no afterTurn auto-curate)", async () => {
+    const recallScript = writeFakeRecall(tmpDir, happyRecallScript([]));
+    const engine = new ByteRoverContextEngine(
+      { cwd: tmpDir, recallScript },
+      makeLogger(),
+    );
+
+    const result = await engine.ingest({
+      sessionId: "s1",
+      message: { role: "user", content: "hi" },
+    });
+    expect(result).toEqual({ ingested: false });
+  });
+
+  it("dispose is a no-op", async () => {
+    const recallScript = writeFakeRecall(tmpDir, happyRecallScript([]));
+    const engine = new ByteRoverContextEngine(
+      { cwd: tmpDir, recallScript },
+      makeLogger(),
+    );
+    await expect(engine.dispose()).resolves.toBeUndefined();
   });
 });
