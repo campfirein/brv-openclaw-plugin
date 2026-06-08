@@ -6,12 +6,7 @@ import type {
   IngestResult,
   PluginLogger,
 } from "./types.js";
-import { dirname } from "node:path";
-import {
-  resolveRecallScript,
-  spawnRecall,
-  type RecallSpawnConfig,
-} from "./recall-spawn.js";
+import { recall, resolveScriptsDir } from "./recall.js";
 import { buildCurateGuidance } from "./curate-guidance.js";
 import { resolveWorkspaceDir, stripUserMetadata, extractTextContent } from "./message-utils.js";
 
@@ -30,17 +25,10 @@ export interface ByteRoverPluginConfig {
   recallLimit?: number;
 }
 
-/**
- * Hard cap on the assemble deadline, kept under OpenClaw's agent-ready
- * timeout (15s) so a slow recall can't block the runtime. The effective
- * deadline is `min(config.recallTimeoutMs, ASSEMBLE_DEADLINE_CAP_MS)`.
- */
-const ASSEMBLE_DEADLINE_CAP_MS = 10_000;
-
 /** Default top-N when the caller doesn't override. */
 const DEFAULT_RECALL_LIMIT = 5;
 
-/** Minimum query length worth spawning a subprocess for. */
+/** Minimum query length worth running a recall for. */
 const MIN_QUERY_LENGTH = 5;
 
 /**
@@ -71,13 +59,11 @@ export class ByteRoverContextEngine implements ContextEngine {
   private readonly logger: PluginLogger;
   private readonly baseCwd: string | undefined;
   private readonly recallLimit: number;
-  private readonly assembleDeadlineMs: number;
-  private readonly recallConfig: RecallSpawnConfig;
   /**
-   * Sibling-of-recall.mjs path used to compose the `node …/record.mjs …`
-   * invocations baked into the curate guidance. Resolved once at construction
-   * time from the plugin's recallScript config so the guidance shows the
-   * exact path this user's agent should run, no hardcoded paths.
+   * Directory holding the bundled `.mjs` scripts, used to compose the
+   * `node …/record.mjs …` invocations baked into the curate guidance (the
+   * agent runs record via its own shell/code-exec tool). Resolved once at
+   * construction. Recall itself is now in-process — no script is spawned.
    */
   private readonly scriptsDir: string;
   private readonly curateGuidance: string;
@@ -86,18 +72,11 @@ export class ByteRoverContextEngine implements ContextEngine {
     this.logger = logger;
     this.baseCwd = config.cwd;
     this.recallLimit = config.recallLimit ?? DEFAULT_RECALL_LIMIT;
-    const configured = config.recallTimeoutMs ?? ASSEMBLE_DEADLINE_CAP_MS;
-    this.assembleDeadlineMs = Math.min(configured, ASSEMBLE_DEADLINE_CAP_MS);
-    this.recallConfig = {
-      recallScript: config.recallScript,
-      timeoutMs: this.assembleDeadlineMs,
-    };
-    this.scriptsDir = dirname(resolveRecallScript(this.recallConfig));
+    this.scriptsDir = resolveScriptsDir({ recallScript: config.recallScript });
     this.curateGuidance = buildCurateGuidance({ scriptsDir: this.scriptsDir });
     this.logger.debug?.(
-      `[byterover] mono engine ready (recall=${resolveRecallScript(this.recallConfig)}, ` +
-        `timeoutMs=${this.assembleDeadlineMs}, limit=${this.recallLimit}, ` +
-        `scriptsDir=${this.scriptsDir})`,
+      `[byterover] mono engine ready (in-process recall, ` +
+        `limit=${this.recallLimit}, scriptsDir=${this.scriptsDir})`,
     );
   }
 
@@ -134,15 +113,8 @@ export class ByteRoverContextEngine implements ContextEngine {
     // record even if this turn produced no retrievable hits.
     let retrievedContent = "";
     if (query && cwd) {
-      const ac = new AbortController();
-      const deadline = setTimeout(() => ac.abort(), this.assembleDeadlineMs);
       try {
-        const result = await spawnRecall(
-          query,
-          { cwd, limit: this.recallLimit, signal: ac.signal },
-          this.recallConfig,
-          this.logger,
-        );
+        const result = await recall(query, { cwd, limit: this.recallLimit }, this.logger);
         retrievedContent = result.content;
         if (result.matchedDocs.length > 0) {
           this.logger.info(
@@ -151,10 +123,8 @@ export class ByteRoverContextEngine implements ContextEngine {
           );
         }
       } catch (err) {
-        // spawnRecall already swallows; this catch is belt-and-suspenders.
+        // recall already swallows; this catch is belt-and-suspenders.
         this.logger.warn(`[byterover] assemble recall threw (best-effort): ${String(err)}`);
-      } finally {
-        clearTimeout(deadline);
       }
     } else if (!query) {
       this.logger.debug?.("[byterover] assemble: no usable query — skipping recall");
