@@ -25,7 +25,9 @@
     "README.md",
     "LICENSE"
   ],
-  "dependencies": {},
+  "dependencies": {
+    "typebox": "^1.2.2"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "esbuild": "^0.27.0",

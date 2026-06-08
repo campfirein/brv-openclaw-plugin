@@ -11,6 +11,12 @@ declare module "@byterover/core" {
   /** Resolve the centralized context-tree root for a project base directory. */
   export function resolveContextRoot(baseDir: string): Promise<string>;
 
+  /** Like resolveContextRoot, but bootstraps the space/tree if missing. */
+  export function ensureContextRoot(
+    baseDir?: string,
+    opts?: { space_id?: string; displayName?: string },
+  ): Promise<string>;
+
   /** Resolve a tree-relative topic path to an absolute path within `root`. */
   export function resolveWithinTree(root: string, relPath: string): string;
 
@@ -28,4 +34,19 @@ declare module "@byterover/core" {
     limit: number,
     options?: { now?: string; [key: string]: unknown },
   ): Promise<SearchHit[]>;
+
+  export type HtmlWriteResult =
+    | { ok: true; created: boolean; relPath: string; warnings?: unknown[] }
+    | { ok: false; errors: { message: string }[] };
+
+  /** Validate + atomically write a <bv-topic> HTML document to the tree. */
+  export function writeTopic(
+    root: string,
+    options: {
+      agent?: string;
+      confirmOverwrite?: boolean;
+      rawHtml: string;
+      now?: string;
+    },
+  ): Promise<HtmlWriteResult>;
 }

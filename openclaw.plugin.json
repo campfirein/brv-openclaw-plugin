@@ -2,6 +2,9 @@
   "id": "byterover",
   "kind": "context-engine",
   "name": "ByteRover",
+  "contracts": {
+    "tools": ["brv_record"]
+  },
   "description": "ByteRover context engine (mono) — recalls curated knowledge from the centralized brv data dir (<brv-data>/projects/<flat>/context-tree/) into the assemble system prompt; agent invokes `record.mjs` via its shell/code-exec tool to save new knowledge.",
   "configSchema": {
     "type": "object",

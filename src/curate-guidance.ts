@@ -19,10 +19,7 @@ export interface CurateGuidanceContext {
   readonly scriptsDir: string;
 }
 
-export function buildCurateGuidance(ctx: CurateGuidanceContext): string {
-  const recordPath = `${ctx.scriptsDir}/record.mjs`;
-  const brvPath = `${ctx.scriptsDir}/brv.mjs`;
-
+export function buildCurateGuidance(_ctx: CurateGuidanceContext): string {
   return `<byterover-curate-guidance>
 # IRON LAW — read and obey
 
@@ -33,65 +30,75 @@ durable memory. Two rules govern every substantive turn:
    Cite the topic path when your answer relies on it. Do not contradict a
    retrieved \`<bv-rule severity="must">\` without explicitly flagging it.
 
-2. **CURATE new knowledge** at the END of your turn, before the final reply,
-   whenever your work this turn produced any of these:
+2. **CURATE new knowledge** at the END of your turn, before the final reply —
+   AUTOMATICALLY, without being asked. Calling \`brv_record\` is a REQUIRED step
+   of any substantive turn: a turn that states knowledge but does not record it
+   is INCOMPLETE. Whenever your work this turn produced any of these, you MUST
+   record:
+     - **Facts, definitions, history, or explanations you stated** — INCLUDING
+       answers to "tell me N facts about X", "explain X", "what is X",
+       "summarize X", "talk about X". This is the most common case. It does NOT
+       matter that it's "general knowledge" or that the user didn't ask to save.
      - A decision the team should remember (e.g. "we use OAuth 2.0 with PKCE")
      - A rule or convention worth pinning ("never log full JWTs")
      - A bug root cause + the fix that resolved it
      - A non-obvious gotcha, constraint, or pattern
-     - A fact the user explicitly asked you to save
 
-   You curate by running \`record.mjs\` via your shell / code-execution tool.
-   This is NOT optional for substantive turns — the user expects ByteRover
-   to learn from this conversation; that only happens if you save now.
+   You curate by CALLING the **\`brv_record\`** tool. NOT optional. The user
+   expects ByteRover to learn from EVERY informative turn — that only happens if
+   you call \`brv_record\` now. When in doubt, record.
 
-## When to SKIP curation
+   **Record DIRECTLY — do not propose or ask first.** Calling \`brv_record\` IS
+   the save. Never say "Would you like me to save this?", "I'll record this", or
+   "Here's what I'd save…", and never output a draft/proposal in place of the
+   tool call. Just call the tool; confirm only AFTER it returns ok.
 
-- The answer was a one-word reply, a greeting, or a clarifying question.
-- The retrieved context already covered everything; you added no new fact.
+   **Use \`brv_record\` ONLY** to save knowledge — never \`skill_workshop\`,
+   skill proposals, \`web_search\`, or file writes. Those are not ByteRover;
+   \`skill_workshop\` edits skills via proposals and is the wrong tool. If you
+   start drafting a \`proposal_content\`, stop and call \`brv_record\` instead.
+   And NEVER tell the user you saved something unless \`brv_record\` actually
+   returned ok this turn — a save-claim without the real tool call is forbidden.
+
+## When to SKIP curation (narrow — these ONLY)
+
+- A pure greeting, acknowledgement ("ok"/"thanks"), or one-word reply.
+- A clarifying question with no content of its own.
+- The retrieved context already contained EVERYTHING you said (you added nothing new).
 - The user explicitly said "don't record this" or equivalent.
 
-If any of those apply, do not curate. Otherwise: curate.
+If none of those apply, you MUST curate. "The user only asked a question, not to
+save" is NOT a valid skip reason — informative answers are always recorded.
 
-# HOW to curate — pick ONE form per topic
+**FINAL CHECK before every reply:** did I state knowledge worth keeping, and have
+I already called \`brv_record\` this turn? If knowledge was stated and not yet
+recorded, call \`brv_record\` before responding.
 
-## Form A — Simple (one-fact topics only)
+# HOW to curate — call the \`brv_record\` tool
 
-\`\`\`bash
-node ${recordPath} "<domain>/<topic>" \\
-  --title "<short title>" \\
-  --summary "<one-line summary>" \\
-  --keywords "<comma,separated,retrieval,terms>" \\
-  --tags "<comma,separated,categories>" \\
-  --body "<one durable paragraph>"
+Author the topic as a \`<bv-topic>\` HTML document, then call the tool:
+
+\`\`\`
+brv_record({
+  path: "<domain>/<topic>",          // slash-separated snake_case; NO ".html"
+  html: "<bv-topic path=\\"<domain>/<topic>\\" title=\\"<short title>\\"
+           summary=\\"<one-line semantic summary>\\"
+           keywords=\\"<csv retrieval terms>\\" tags=\\"<csv categories>\\"
+           related=\\"@<other/topic>.html\\"
+         ><bv-task>What this topic is about, one sentence.</bv-task>
+         <bv-decision id=\\"d-...\\">The decision in one sentence.</bv-decision>
+         <bv-reason>Why this decision holds. The decision rots without this.</bv-reason>
+         <bv-rule severity=\\"must\\">Verbatim project rule.</bv-rule>
+         <bv-fact subject=\\"snake_case_subject\\" category=\\"convention\\" value=\\"extracted-form\\">Canonical natural-language statement.</bv-fact>
+         <bv-files><li>src/path/to/file.ts</li></bv-files>
+         </bv-topic>"
+})
 \`\`\`
 
-Use Form A ONLY when the fact is genuinely one sentence (e.g. "Prod runs
-Node 22 LTS"). Wrapping a single fact in \`<bv-decision>\` + \`<bv-reason>\`
-+ \`<bv-rule>\` is theater.
-
-## Form B — Rich (multi-element topics) — REQUIRED for substantive curates
-
-For anything that carries a decision + reason, a rule + fact, a bug + fix,
-or any combination of structured knowledge, you MUST use the rich form.
-Form A's lone \`<bv-fact>\` wrapper is structurally wrong for these.
-
-\`\`\`bash
-node ${recordPath} "<domain>/<topic>" --html '<bv-topic
-  path="<domain>/<topic>"
-  title="<short title>"
-  summary="<one-line semantic summary>"
-  keywords="<csv retrieval terms>"
-  tags="<csv categories>"
-  related="@<other/topic>.html"
-><bv-task>What this topic is about, one sentence.</bv-task>
-<bv-decision id="d-...">The decision in one sentence.</bv-decision>
-<bv-reason>Why this decision holds. The decision rots without this.</bv-reason>
-<bv-rule severity="must">Verbatim project rule. Use "must" for RFC2119-MUST.</bv-rule>
-<bv-fact subject="snake_case_subject" category="convention" value="extracted-form">Canonical natural-language statement.</bv-fact>
-<bv-files><li>src/path/to/file.ts</li></bv-files>
-</bv-topic>'
-\`\`\`
+- \`path\` MUST match the \`<bv-topic path="…">\` attribute.
+- \`overwrite: true\` ONLY when updating an existing path (merge first — see below).
+- Even a one-fact topic needs a real \`<bv-topic>\` with \`<bv-reason>\` +
+  \`<bv-task>\` + the fact. Don't skip structure because it's small.
 
 # The full <bv-*> vocabulary — 19 elements, pick the right tag
 
@@ -249,25 +256,24 @@ to find it.
 
 # Path-exists collision (you record into an existing path)
 
-If record.mjs returns \`A topic already exists at "<path>"\`:
+If \`brv_record\` reports a topic already exists at "<path>":
 
-1. Read the existing topic:
-   \`\`\`bash
-   node ${brvPath} read "<path>.html"
-   \`\`\`
+1. Use the existing topic's content — it's often already in the retrieved
+   context block above.
 2. MERGE: preserve every prior \`<bv-rule>\`, \`<bv-fact>\`, \`<bv-decision>\`,
    \`<bv-bug>\`, \`<bv-fix>\`. Enrich, never shrink. Add your new facts
    alongside.
-3. Re-run with \`--overwrite\`. If you see \`structural-loss\` in warnings,
-   you dropped element types — add them back and retry.
+3. Call \`brv_record\` again with the same \`path\`, the merged \`html\`, and
+   \`overwrite: true\`. If the result warns \`structural-loss\`, you dropped
+   element types — add them back and retry.
 
 # After-curate behavior
 
-When record.mjs returns \`ok: true\`, briefly mention to the user that you
-saved the knowledge (e.g. "Saved to byterover at \`security/auth\`."). Do
-NOT dump the full HTML back at them — the file path is enough.
+When \`brv_record\` succeeds, briefly mention to the user that you saved the
+knowledge (e.g. "Saved to byterover at \`security/auth\`."). Do NOT dump the
+full HTML back at them — the saved path is enough.
 
-If record.mjs returns \`ok: false\`, surface the error message to the user
-plainly. Do not silently retry more than once.
+If \`brv_record\` fails, surface the error message to the user plainly. Do
+not silently retry more than once.
 </byterover-curate-guidance>`;
 }

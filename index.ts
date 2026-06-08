@@ -2,6 +2,7 @@ import {
   ByteRoverContextEngine,
   type ByteRoverPluginConfig,
 } from "./src/context-engine.js";
+import { makeRecordTool } from "./src/record.js";
 import type { OpenClawPluginApi } from "./src/types.js";
 
 // Keep this string identical to `openclaw.plugin.json` → description.
@@ -41,8 +42,16 @@ const byteRoverPlugin = {
       () => new ByteRoverContextEngine(engineConfig, api.logger),
     );
 
+    // First-class memory-write tool. The engine injects curate guidance, but
+    // the agent records by CALLING this tool (in-process via @byterover/core) —
+    // far more reliable than shelling out to record.mjs from prose.
+    api.registerTool(
+      (ctx) => makeRecordTool(ctx, { baseCwd: engineConfig.cwd, logger: api.logger }),
+      { name: "brv_record" },
+    );
+
     api.logger.info(
-      "[byterover] Plugin loaded (mono, context-engine only — no brv-bridge)",
+      "[byterover] Plugin loaded (mono context-engine + brv_record tool)",
     );
   },
 };
