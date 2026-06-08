@@ -17,11 +17,16 @@ import { resolveWorkspaceDir, stripUserMetadata, extractTextContent } from "./me
 export interface ByteRoverPluginConfig {
   /** Default working directory when sessionKey doesn't resolve to one. */
   cwd?: string;
-  /** Path to mono's `recall.mjs`. Defaults to `~/.openclaw/skills/byterover/scripts/recall.mjs`. */
+  /**
+   * Path to mono's bundled scripts — used to derive the `record.mjs` path baked
+   * into the curate guidance (recall itself is in-process). Defaults to the
+   * installed skill dir: `~/.agents/skills/byterover/scripts` (legacy:
+   * `~/.openclaw/skills/byterover/scripts`).
+   */
   recallScript?: string;
-  /** Hard deadline for the recall subprocess. Defaults to 10s. */
+  /** Deprecated/ignored — recall is in-process; no subprocess deadline. */
   recallTimeoutMs?: number;
-  /** Top-N hit cap passed to recall.mjs. Defaults to 5. */
+  /** Top-N hit cap passed to recall. Defaults to 5. */
   recallLimit?: number;
 }
 

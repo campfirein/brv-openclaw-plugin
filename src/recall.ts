@@ -18,6 +18,7 @@
  * never blocks the host's assemble step.
  */
 
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -52,12 +53,19 @@ const DEFAULT_LIMIT = 5;
  * shell tool). Pure path logic; no I/O, no subprocess.
  *
  * Precedence: explicit `recallScript` (its parent dir) → the
- * `OPENCLAW_BYTEROVER_RECALL_SCRIPT` env var → `~/.openclaw/skills/byterover/scripts`.
+ * `OPENCLAW_BYTEROVER_RECALL_SCRIPT` env var → the first existing install dir.
+ *
+ * OpenClaw 2026.6+ installs skills under `~/.agents/skills`; older builds used
+ * `~/.openclaw/skills`. Prefer whichever exists, defaulting to `.agents`.
  */
 export function resolveScriptsDir(opts: { recallScript?: string } = {}): string {
   const explicit = opts.recallScript?.trim() || process.env.OPENCLAW_BYTEROVER_RECALL_SCRIPT?.trim();
   if (explicit) return dirname(explicit);
-  return join(homedir(), ".openclaw", "skills", "byterover", "scripts");
+  const candidates = [
+    join(homedir(), ".agents", "skills", "byterover", "scripts"),
+    join(homedir(), ".openclaw", "skills", "byterover", "scripts"),
+  ];
+  return candidates.find((p) => existsSync(p)) ?? candidates[0];
 }
 
 /**

@@ -8,7 +8,7 @@ import type { OpenClawPluginApi } from "./src/types.js";
 // The manifest is what OpenClaw renders in the UI; this one is the in-process
 // default for hosts that pass the plugin object directly.
 const PLUGIN_DESCRIPTION =
-  "ByteRover context engine (mono) — recalls curated knowledge from a centralized ~/.brv/projects/<flat>/context-tree/ into the assemble system prompt; agent invokes `record.mjs` via its shell/code-exec tool to save new knowledge.";
+  "ByteRover context engine (mono) — recalls curated knowledge from the centralized brv data dir (<brv-data>/projects/<flat>/context-tree/) into the assemble system prompt; agent invokes `record.mjs` via its shell/code-exec tool to save new knowledge.";
 
 const byteRoverPlugin = {
   id: "byterover",

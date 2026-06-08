@@ -2,18 +2,18 @@
   "id": "byterover",
   "kind": "context-engine",
   "name": "ByteRover",
-  "description": "ByteRover context engine (mono) — recalls curated knowledge from a centralized ~/.brv/projects/<flat>/context-tree/ into the assemble system prompt; agent invokes `record.mjs` via its shell/code-exec tool to save new knowledge.",
+  "description": "ByteRover context engine (mono) — recalls curated knowledge from the centralized brv data dir (<brv-data>/projects/<flat>/context-tree/) into the assemble system prompt; agent invokes `record.mjs` via its shell/code-exec tool to save new knowledge.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
       "cwd": {
         "type": "string",
-        "description": "Working directory for byterover-mono commands. Resolved against the project that has been `brv init`-ed (its tree lives at ~/.brv/projects/<flat-cwd>/context-tree/)."
+        "description": "Working directory for byterover-mono commands. Resolved against the project that has been `brv init`-ed (its tree lives at <brv-data>/projects/<flat-cwd>/context-tree/)."
       },
       "recallScript": {
         "type": "string",
-        "description": "Absolute path to mono's recall.mjs. Defaults to ~/.openclaw/skills/byterover/scripts/recall.mjs. Overridable per-host via the OPENCLAW_BYTEROVER_RECALL_SCRIPT env var."
+        "description": "Path to mono's bundled scripts (its parent dir is used for the record.mjs path in the curate guidance; recall is in-process). Defaults to the installed skill dir — ~/.agents/skills/byterover/scripts (legacy: ~/.openclaw/skills/byterover/scripts). Overridable via the OPENCLAW_BYTEROVER_RECALL_SCRIPT env var."
       },
       "recallTimeoutMs": {
         "type": "number",
