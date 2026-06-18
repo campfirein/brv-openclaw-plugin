@@ -89,6 +89,8 @@ describe("ByteRoverContextEngine", () => {
     expect(result.systemPromptAddition).toContain("Regex patterns");
     expect(result.systemPromptAddition).toContain('disclosure="public"');
     expect(result.systemPromptAddition).toContain("Regex patterns only");
+    expect(result.systemPromptAddition).toContain("ByteRover knowledge gap");
+    expect(result.systemPromptAddition).toContain("Unrelated retrieved context");
     expect(result.systemPromptAddition).not.toContain("Curating every turn");
     expect(result.systemPromptAddition).not.toContain("# Project knowledge retrieved from ByteRover");
   });

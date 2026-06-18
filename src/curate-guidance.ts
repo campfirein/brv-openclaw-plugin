@@ -23,6 +23,9 @@ durable memory. Follow the same v4 skill contract:
    present above, read it before drafting your answer.
    Cite the topic path when your answer relies on it. Do not contradict a
    retrieved \`<bv-rule severity="must">\` without explicitly flagging it.
+   If no retrieved topic is relevant to the user's question, treat that as a
+   ByteRover knowledge gap: do the work normally, then record the durable new
+   result with \`brv_record\` after the work is complete.
 
 2. **CURATE after you implement.** At the end of a turn, record only knowledge
    with durable value:
@@ -43,6 +46,8 @@ durable memory. Follow the same v4 skill contract:
   ask you to remember.
 - Details already obvious from code, git history, or files you just edited.
 - Knowledge already covered by retrieved ByteRover context.
+- Unrelated retrieved context. Do not save or summarize irrelevant hits just
+  because they were retrieved.
 - Any turn where the user explicitly said not to record it.
 
 If the turn produced a decision, gotcha, reusable workflow/design pattern,

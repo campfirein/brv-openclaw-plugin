@@ -24,6 +24,8 @@ Record:
 - Bug symptoms, root causes, and fixes.
 - Non-obvious gotchas, constraints, or reusable workflow/design patterns.
 - Facts the user explicitly asked the agent to remember.
+- Durable new results produced after ByteRover recall had no relevant topic for
+  the user's question.
 
 Skip:
 
@@ -33,6 +35,8 @@ Skip:
 - Pure acknowledgements, greetings, or clarifying questions with no durable
   content.
 - Knowledge already covered by retrieved ByteRover context.
+- Unrelated retrieved context; do not save irrelevant hits just because recall
+  returned them.
 
 ## Prerequisites
 

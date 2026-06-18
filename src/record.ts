@@ -111,7 +111,9 @@ export function makeRecordTool(
       "brv_record - save durable project knowledge to ByteRover after decisions, gotchas, workflow/design patterns, bug fixes, conventions, or explicit remember-this facts.",
     promptGuidelines: [
       "Use `brv_record` after work that produced durable project memory: decisions and reasons, rules/conventions, bug root cause plus fix, non-obvious gotchas or constraints, reusable workflow/design patterns, or facts the user explicitly asked you to remember.",
+      "If ByteRover recall returned no relevant topic for the user's question, treat that as a knowledge gap: do the work normally, then record the durable new result after the work is complete.",
       "Do not record general explanations, definitions, summaries, or facts unless the user asked to remember them. Do not record what code, git history, or recently edited files already make obvious.",
+      "Do not save or summarize unrelated retrieved context just because it was retrieved.",
       "Prefer updating an existing topic over creating a near-duplicate. If retrieved context already covers the knowledge, skip recording or merge only the new durable part.",
       "Match the user's language for human-readable content, title, and summary; keep tag names, attribute names, enum values, fact subjects, and topic paths in English.",
       "Author one proper `<bv-topic>` HTML document per stable subject. Use `<bv-task>` plus the element that matches the knowledge kind (`<bv-decision>`, `<bv-rule>`, `<bv-bug>` + `<bv-fix>`, `<bv-structure>`, `<bv-examples>`, `<bv-fact>`, etc.). Use `<bv-pattern>` only for regex patterns; use `<bv-structure>` or `<bv-examples>` for workflow/design patterns.",

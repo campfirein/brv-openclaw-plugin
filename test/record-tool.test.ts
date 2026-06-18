@@ -32,6 +32,8 @@ describe("brv_record tool (in-process)", () => {
     expect(guidelines).toContain("Use `<bv-pattern>` only for regex patterns");
     expect(guidelines).toContain("facts default restricted");
     expect(guidelines).toContain("one concise `<bv-highlights>` or `<bv-structure>`");
+    expect(guidelines).toContain("treat that as a knowledge gap");
+    expect(guidelines).toContain("unrelated retrieved context");
     expect(guidelines).not.toContain("EVERY informative");
     expect(guidelines).not.toContain("general knowledge");
   });
