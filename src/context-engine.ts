@@ -6,7 +6,7 @@ import type {
   IngestResult,
   PluginLogger,
 } from "./types.js";
-import { recall, resolveScriptsDir } from "./recall.js";
+import { recall } from "./recall.js";
 import { buildCurateGuidance } from "./curate-guidance.js";
 import { resolveWorkspaceDir, stripUserMetadata, extractTextContent } from "./message-utils.js";
 
@@ -18,13 +18,11 @@ export interface ByteRoverPluginConfig {
   /** Default working directory when sessionKey doesn't resolve to one. */
   cwd?: string;
   /**
-   * Path to mono's bundled scripts — used to derive the `record.mjs` path baked
-   * into the curate guidance (recall itself is in-process). Defaults to the
-   * installed skill dir: `~/.agents/skills/byterover/scripts` (legacy:
-   * `~/.openclaw/skills/byterover/scripts`).
+   * Deprecated no-op retained for config compatibility with the script-backed
+   * mono prototype. Recall and record are both in-process on this branch.
    */
   recallScript?: string;
-  /** Deprecated/ignored — recall is in-process; no subprocess deadline. */
+  /** Deprecated/ignored; recall is in-process and this timeout is ignored. */
   recallTimeoutMs?: number;
   /** Top-N hit cap passed to recall. Defaults to 5. */
   recallLimit?: number;
@@ -41,13 +39,10 @@ const MIN_QUERY_LENGTH = 5;
  * context-engine kind.
  *
  * Diverges from the cli-backed sibling on `release/2.0.0` in two ways:
- *   - No `afterTurn` lifecycle. Mono has no `brv curate` session protocol
- *     for the engine to drive; the agent itself runs `record.mjs` via its
- *     shell / code-exec tool when guided by the curate block we inject
- *     in `assemble`.
- *   - `assemble` spawns `recall.mjs` (a one-shot Node script) instead of
- *     calling `@byterover/brv-bridge.recall()`. Same envelope shape, so
- *     the downstream concatenation + system-prompt-addition is identical.
+ *   - No `afterTurn` lifecycle. The agent records durable knowledge by calling
+ *     the registered `brv_record` tool.
+ *   - `assemble` recalls in-process via `@byterover/core` instead of an
+ *     external CLI path.
  *
  * Best-effort everywhere: any recall failure collapses to an empty
  * content block, and the curate guidance still ships, so the host can
@@ -64,30 +59,22 @@ export class ByteRoverContextEngine implements ContextEngine {
   private readonly logger: PluginLogger;
   private readonly baseCwd: string | undefined;
   private readonly recallLimit: number;
-  /**
-   * Directory holding the bundled `.mjs` scripts, used to compose the
-   * `node …/record.mjs …` invocations baked into the curate guidance (the
-   * agent runs record via its own shell/code-exec tool). Resolved once at
-   * construction. Recall itself is now in-process — no script is spawned.
-   */
-  private readonly scriptsDir: string;
   private readonly curateGuidance: string;
 
   constructor(config: ByteRoverPluginConfig, logger: PluginLogger) {
     this.logger = logger;
     this.baseCwd = config.cwd;
     this.recallLimit = config.recallLimit ?? DEFAULT_RECALL_LIMIT;
-    this.scriptsDir = resolveScriptsDir({ recallScript: config.recallScript });
-    this.curateGuidance = buildCurateGuidance({ scriptsDir: this.scriptsDir });
+    this.curateGuidance = buildCurateGuidance({});
     this.logger.debug?.(
       `[byterover] mono engine ready (in-process recall, ` +
-        `limit=${this.recallLimit}, scriptsDir=${this.scriptsDir})`,
+        `limit=${this.recallLimit})`,
     );
   }
 
   // ---------------------------------------------------------------------------
-  // ingest — no-op. Mono has no afterTurn auto-curate; the agent self-services
-  // via record.mjs guided by the block injected in assemble.
+  // ingest — no-op. Mono has no afterTurn auto-curate; the agent records via
+  // the brv_record tool guided by the block injected in assemble.
   // ---------------------------------------------------------------------------
 
   async ingest(_params: {
@@ -99,7 +86,7 @@ export class ByteRoverContextEngine implements ContextEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // assemble — spawn recall.mjs, build the system-prompt addition (retrieved
+  // assemble — run recall, build the system-prompt addition (retrieved
   // content + curate guidance). Never throws to the host.
   // ---------------------------------------------------------------------------
 
@@ -208,9 +195,7 @@ export class ByteRoverContextEngine implements ContextEngine {
  * knowledge is from ByteRover") was too passive — models read it and moved
  * on. The new wrapper tells the model what to DO with the content.
  *
- * The curate-guidance argument is pre-rendered with the user's resolved
- * scripts dir (see `ByteRoverContextEngine.curateGuidance`); we just append
- * it.
+ * The curate-guidance argument is pre-rendered once by the engine; we append it.
  */
 export function buildSystemPromptAddition(
   retrievedContent: string,

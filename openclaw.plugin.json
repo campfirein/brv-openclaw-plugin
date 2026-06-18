@@ -5,7 +5,7 @@
   "contracts": {
     "tools": ["brv_record"]
   },
-  "description": "ByteRover context engine (mono) — recalls curated knowledge from the centralized brv data dir (<brv-data>/projects/<flat>/context-tree/) into the assemble system prompt; agent invokes `record.mjs` via its shell/code-exec tool to save new knowledge.",
+  "description": "ByteRover context engine (mono) - recalls curated knowledge from the centralized brv data dir into the assemble system prompt; agents save durable knowledge with the `brv_record` tool.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -16,11 +16,11 @@
       },
       "recallScript": {
         "type": "string",
-        "description": "Path to mono's bundled scripts (its parent dir is used for the record.mjs path in the curate guidance; recall is in-process). Defaults to the installed skill dir — ~/.agents/skills/byterover/scripts (legacy: ~/.openclaw/skills/byterover/scripts). Overridable via the OPENCLAW_BYTEROVER_RECALL_SCRIPT env var."
+        "description": "Deprecated no-op retained for compatibility with the older script-backed mono prototype. Recall and record are in-process on this branch."
       },
       "recallTimeoutMs": {
         "type": "number",
-        "description": "Hard deadline for the recall subprocess. Defaults to 10000. Capped at 10000 to stay within OpenClaw's agent-ready timeout."
+        "description": "Deprecated no-op retained for compatibility. Recall is in-process and this timeout is ignored."
       },
       "recallLimit": {
         "type": "number",
@@ -28,7 +28,7 @@
       },
       "queryTimeoutMs": {
         "type": "number",
-        "description": "Legacy alias for recallTimeoutMs (cli-flavor compat). Use recallTimeoutMs in new configs."
+        "description": "Deprecated no-op legacy alias from the CLI-flavored plugin. Recall is in-process on this branch."
       }
     }
   }

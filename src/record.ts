@@ -1,12 +1,10 @@
 /**
  * In-process `brv_record` tool — the agent-facing memory-write path.
  *
- * Why a tool (not shell-out guidance): the context engine injects curate
- * guidance, but the OpenClaw agent rarely synthesizes a correct `node
- * record.mjs --html '…'` shell command from prose, so nothing got recorded.
- * A first-class tool the model can call directly fixes that — and writing
- * in-process via `@byterover/core` keeps the dist `child_process`-free
- * (scanner-clean), same as recall.
+ * Why a tool: the context engine injects curate guidance, but prose alone is
+ * not a reliable persistence path. A first-class tool gives the model a
+ * direct memory-write action, and writing in-process via `@byterover/core`
+ * keeps the dist `child_process`-free (scanner-clean), same as recall.
  *
  * Contract mirrors byterover-mono commands.ts → case "record":
  *   writeTopic(root, { agent, confirmOverwrite, rawHtml }).
@@ -30,7 +28,7 @@ export const RecordParams = Type.Object({
   }),
   html: Type.String({
     description:
-      "The full <bv-topic>…</bv-topic> HTML document to persist. Author it per the <byterover-curate-guidance> block (bv-reason + bv-task + structural elements + bv-fact).",
+      "The full <bv-topic>...</bv-topic> HTML document to persist. Author it per the <byterover-curate-guidance> block (bv-task plus the appropriate bv-* elements for the knowledge kind).",
   }),
   overwrite: Type.Optional(
     Type.Boolean({
@@ -110,18 +108,17 @@ export function makeRecordTool(
     description:
       "Save durable project knowledge to ByteRover as a <bv-topic> HTML document (decisions, rules, bug+fix, conventions, gotchas, or facts the user asks you to remember). Author the HTML per the <byterover-curate-guidance> block; this tool persists it.",
     promptSnippet:
-      "brv_record — save durable knowledge to ByteRover. Call it automatically at end of turn when you produced new facts.",
+      "brv_record - save durable project knowledge to ByteRover after decisions, gotchas, workflow/design patterns, bug fixes, conventions, or explicit remember-this facts.",
     promptGuidelines: [
-      "ByteRover curation is MANDATORY, not optional. `brv_record` is a REQUIRED step of any substantive turn — a turn that states knowledge but does not call `brv_record` is INCOMPLETE and wrong. Never answer-and-stop on such a turn.",
-      "HARD TRIGGER — these ALWAYS require a `brv_record` call before you finish: \"tell me N facts about X\", \"explain X\", \"what is X\", \"summarize X\", \"talk about X\", \"give me info on X\", or any reply where you state facts, definitions, history, or explanations. If you just produced a list of facts about something, you MUST record it. No exceptions for 'it's general knowledge' or 'the user didn't ask to save'.",
-      "Do NOT wait to be asked. The user expects EVERY informative turn to be saved automatically. 'Tell me 5 facts about Luffy' → answer AND call `brv_record` with a `<bv-topic>` for Luffy. Same for every topic.",
-      "RECORD DIRECTLY — never propose, ask permission, or announce intent. Do NOT say \"Would you like me to save this?\", \"I'll record this\", \"Here's what I'd save…\", or output a draft/proposal in place of the actual tool call. Calling `brv_record` IS the save — just call it. Confirm only AFTER it returns, in one short line.",
-      "USE `brv_record` AND ONLY `brv_record` to save knowledge. Do NOT use `skill_workshop`, skill proposals, `web_search`, file writes, or any other tool to store memory — none of those are ByteRover. `skill_workshop` edits agent skills via proposals; it is NOT how you save knowledge. If you catch yourself drafting a `proposal_content`, STOP and call `brv_record` instead.",
-      "NEVER claim you saved/recorded something unless you actually called `brv_record` THIS turn and it returned `ok: true`. A save only exists when `brv_record` returns ok. Do not write \"I've saved this to ByteRover\" as text without the real tool call — that is a fabricated confirmation and is forbidden.",
-      "A recall block is injected each turn. If it did not already contain what you just told the user, that knowledge is NEW — you MUST record it.",
-      "Author the topic as proper `<bv-topic>` HTML (bv-reason + bv-task + the facts) and pass it as `html`. One `brv_record` call per distinct topic.",
-      "The ONLY permitted skips: pure greetings, acknowledgements (\"ok\"/\"thanks\"), one-word replies, clarifying questions with no content, or when the user EXPLICITLY said not to save. Everything else MUST be recorded — when unsure, record.",
-      "FINAL CHECK before sending any reply: \"Did I state knowledge worth keeping? Have I already called `brv_record` this turn?\" If knowledge was stated and you have NOT recorded it, call `brv_record` now before you respond.",
+      "Use `brv_record` after work that produced durable project memory: decisions and reasons, rules/conventions, bug root cause plus fix, non-obvious gotchas or constraints, reusable workflow/design patterns, or facts the user explicitly asked you to remember.",
+      "Do not record general explanations, definitions, summaries, or facts unless the user asked to remember them. Do not record what code, git history, or recently edited files already make obvious.",
+      "Prefer updating an existing topic over creating a near-duplicate. If retrieved context already covers the knowledge, skip recording or merge only the new durable part.",
+      "Match the user's language for human-readable content, title, and summary; keep tag names, attribute names, enum values, fact subjects, and topic paths in English.",
+      "Author one proper `<bv-topic>` HTML document per stable subject. Use `<bv-task>` plus the element that matches the knowledge kind (`<bv-decision>`, `<bv-rule>`, `<bv-bug>` + `<bv-fix>`, `<bv-structure>`, `<bv-examples>`, `<bv-fact>`, etc.). Use `<bv-pattern>` only for regex patterns; use `<bv-structure>` or `<bv-examples>` for workflow/design patterns.",
+      "For a single durable fact, keep the HTML topic small but still structured: `<bv-task>`, one concise `<bv-highlights>` or `<bv-structure>`, and one `<bv-fact>`. Do not force `<bv-decision>` or `<bv-reason>` unless it is actually a decision or the reason matters.",
+      "Never put secrets in topic titles or prose. Sensitive specifics belong in `<bv-fact>` elements; facts default restricted unless `disclosure=\"public\"` is explicitly safe.",
+      "Use `brv_record` only for ByteRover memory writes. Do not use `skill_workshop`, skill proposals, web search, or file writes to store ByteRover knowledge.",
+      "Only say you saved something after `brv_record` returns `ok: true`; otherwise surface the error plainly.",
     ],
     parameters: RecordParams,
     execute: async (_toolCallId: string, params: RecordArgs): Promise<{

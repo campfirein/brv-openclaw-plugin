@@ -9,7 +9,7 @@ import type { OpenClawPluginApi } from "./src/types.js";
 // The manifest is what OpenClaw renders in the UI; this one is the in-process
 // default for hosts that pass the plugin object directly.
 const PLUGIN_DESCRIPTION =
-  "ByteRover context engine (mono) — recalls curated knowledge from the centralized brv data dir (<brv-data>/projects/<flat>/context-tree/) into the assemble system prompt; agent invokes `record.mjs` via its shell/code-exec tool to save new knowledge.";
+  "ByteRover context engine (mono) - recalls curated knowledge from the centralized brv data dir into the assemble system prompt; agents save durable knowledge with the `brv_record` tool.";
 
 const byteRoverPlugin = {
   id: "byterover",
@@ -42,9 +42,8 @@ const byteRoverPlugin = {
       () => new ByteRoverContextEngine(engineConfig, api.logger),
     );
 
-    // First-class memory-write tool. The engine injects curate guidance, but
-    // the agent records by CALLING this tool (in-process via @byterover/core) —
-    // far more reliable than shelling out to record.mjs from prose.
+    // First-class memory-write tool. The engine injects curate guidance, and
+    // the agent records durable memory by calling this in-process tool.
     api.registerTool(
       (ctx) => makeRecordTool(ctx, { baseCwd: engineConfig.cwd, logger: api.logger }),
       { name: "brv_record" },

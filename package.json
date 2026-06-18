@@ -1,7 +1,7 @@
 {
   "name": "@byterover/byterover",
   "version": "3.0.0-mono.0",
-  "description": "ByteRover context engine plugin for OpenClaw (mono build) — recalls curated knowledge into the assemble system prompt via the byterover-mono recall.mjs script; agent invokes record.mjs via its shell/code-exec tool to save new knowledge.",
+  "description": "ByteRover context engine plugin for OpenClaw (mono build) - in-process recall plus the brv_record tool for durable ByteRover memory writes.",
   "type": "module",
   "main": "dist/index.js",
   "license": "Elastic-2.0",
