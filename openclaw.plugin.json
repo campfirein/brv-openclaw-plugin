@@ -2,26 +2,33 @@
   "id": "byterover",
   "kind": "context-engine",
   "name": "ByteRover",
-  "description": "ByteRover context engine — curates and queries conversation context via brv CLI",
+  "contracts": {
+    "tools": ["brv_record"]
+  },
+  "description": "ByteRover context engine (mono) - recalls curated knowledge from the centralized brv data dir into the assemble system prompt; agents save durable knowledge with the `brv_record` tool.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "brvPath": {
+      "cwd": {
         "type": "string",
-        "description": "Path to the brv CLI binary. Defaults to 'brv' (resolved from PATH)."
+        "description": "Working directory for byterover-mono commands. Resolved against the project that has been `brv init`-ed (its tree lives at <brv-data>/projects/<flat-cwd>/context-tree/)."
+      },
+      "recallScript": {
+        "type": "string",
+        "description": "Deprecated no-op retained for compatibility with the older script-backed mono prototype. Recall and record are in-process on this branch."
+      },
+      "recallTimeoutMs": {
+        "type": "number",
+        "description": "Deprecated no-op retained for compatibility. Recall is in-process and this timeout is ignored."
+      },
+      "recallLimit": {
+        "type": "number",
+        "description": "Top-N cap on hits returned by recall. Defaults to 5."
       },
       "queryTimeoutMs": {
         "type": "number",
-        "description": "Timeout in milliseconds for brv query calls. Defaults to 12000. Note: effective assemble deadline is capped at 10000 ms to stay within the agent ready timeout."
-      },
-      "curateTimeoutMs": {
-        "type": "number",
-        "description": "Timeout in milliseconds for brv curate calls. Defaults to 60000."
-      },
-      "cwd": {
-        "type": "string",
-        "description": "Working directory for brv commands. Must be a project with .brv/ initialized."
+        "description": "Deprecated no-op legacy alias from the CLI-flavored plugin. Recall is in-process on this branch."
       }
     }
   }

@@ -1,88 +1,84 @@
 # @byterover/byterover
 
-ByteRover context engine plugin for [OpenClaw](https://github.com/openclaw/openclaw). Integrates the [brv CLI](https://www.byterover.dev) as a context engine that curates conversation knowledge and retrieves relevant context for each prompt — giving your AI agent persistent, queryable memory.
+ByteRover context engine plugin for OpenClaw, mono build. It recalls curated
+knowledge in-process from ByteRover's centralized data directory and exposes
+`brv_record` so the agent can write durable memory through a first-class tool.
 
-## Table of contents
+## What It Does
 
-- [What it does](#what-it-does)
-- [Prerequisites](#prerequisites)
-- [Quick start](#quick-start)
-- [Configuration](#configuration)
-- [How it works](#how-it-works)
-- [Development](#development)
-- [Project structure](#project-structure)
-- [License](#license)
+1. `assemble` runs in-process recall and injects `<byterover-context>` when
+   matching topics exist.
+2. `assemble` always injects `<byterover-curate-guidance>` so the agent knows
+   when and how to preserve durable knowledge.
+3. The plugin registers `brv_record`; there is no `afterTurn` auto-curate flow.
 
-## What it does
+This follows ByteRover v4 skill behavior: query before thinking, then curate
+only knowledge with durable value after implementation.
 
-When you chat with an OpenClaw agent, the conversation is ephemeral — older messages get compacted or lost as the context window fills up. ByteRover changes that by:
+## What To Record
 
-1. **Curating every turn** — after each conversation turn, the plugin feeds the new messages to `brv curate`, which extracts and stores facts, decisions, technical details, and preferences worth remembering
-2. **Querying on demand** — before each new prompt is sent to the LLM, the plugin runs `brv query` with the user's message to retrieve curated knowledge relevant to the current request
-3. **Injecting context** — retrieved knowledge is appended to the system prompt so the LLM has the right context without the user needing to repeat themselves
+Record:
 
-The result: your agent remembers what matters, forgets what doesn't, and retrieves context that's actually relevant to what you're asking about right now.
+- Decisions and the reasoning behind them.
+- Rules, conventions, and preferences worth pinning.
+- Bug symptoms, root causes, and fixes.
+- Non-obvious gotchas, constraints, or reusable workflow/design patterns.
+- Facts the user explicitly asked the agent to remember.
+- Durable new results produced after ByteRover recall had no relevant topic for
+  the user's question.
+
+Skip:
+
+- General explanations, definitions, summaries, or facts the user did not ask
+  the agent to remember.
+- Details already obvious from code, git history, or files just edited.
+- Pure acknowledgements, greetings, or clarifying questions with no durable
+  content.
+- Knowledge already covered by retrieved ByteRover context.
+- Unrelated retrieved context; do not save irrelevant hits just because recall
+  returned them.
 
 ## Prerequisites
 
-- [OpenClaw](https://github.com/openclaw/openclaw) with plugin context engine support
-- Node.js 22+
-- [brv CLI](https://www.byterover.dev) installed and available on your `PATH` (or provide a custom path via config). The brv path depends on how you installed it:
-  - **curl**: the default path is `~/.brv-cli/bin/brv`
-  - **npm**: run `which brv` to find the path, then set it via `brvPath` in the plugin config
+- OpenClaw with plugin context engine support.
+- Node.js 22+.
+- A sibling `byterover-mono` checkout for local build and tests, because
+  `@byterover/core` is bundled at build time.
 
-## Quick start
+By default the build reads:
 
-### 1. Install the plugin
+```bash
+../byterover-mono/packages/core/src/index.ts
+```
+
+Override that path with `BYTEROVER_MONO_CORE` when needed. The published
+runtime bundle is standalone and does not require the `brv` CLI at runtime.
+
+## Quick Start
+
+Install from the package registry:
 
 ```bash
 openclaw plugins install @byterover/byterover
+openclaw config set plugins.slots.contextEngine byterover
 ```
 
-For local development, build the plugin once and link your working copy:
+For local development:
 
 ```bash
 cd /path/to/brv-openclaw-plugin
 npm install
 npm run build
 openclaw plugins install --link /path/to/brv-openclaw-plugin
-```
-
-OpenClaw's install validator requires compiled runtime output (`dist/index.js`) before it will accept a path-linked plugin, so the `npm run build` step is mandatory. Re-run `npm run build` after editing the source.
-
-### 2. Configure the context engine slot
-
-```bash
 openclaw config set plugins.slots.contextEngine byterover
 ```
 
-### 3. Set plugin options
-
-Point the plugin to your brv binary and project directory:
-
-```bash
-openclaw config set plugins.entries.byterover.config.brvPath /path/to/brv
-openclaw config set plugins.entries.byterover.config.cwd /path/to/your/project
-```
-
-### 4. Verify
-
-```bash
-openclaw plugins list
-```
-
-You should see `byterover` listed and enabled. Restart OpenClaw, then start a conversation — you'll see `[byterover] Plugin loaded` in the gateway logs.
-
-### 5. Uninstall (if needed)
-
-```bash
-openclaw plugins uninstall byterover
-openclaw config set plugins.slots.contextEngine ""
-```
+OpenClaw's install validator expects compiled runtime output at
+`dist/index.js`, so rebuild before linking after source edits.
 
 ## Configuration
 
-ByteRover is configured through `plugins.entries.byterover.config` in your OpenClaw config file (`~/.openclaw/openclaw.json`):
+Configure the plugin through `plugins.entries.byterover.config`:
 
 ```json
 {
@@ -94,10 +90,8 @@ ByteRover is configured through `plugins.entries.byterover.config` in your OpenC
       "byterover": {
         "enabled": true,
         "config": {
-          "brvPath": "/usr/local/bin/brv",
           "cwd": "/path/to/your/project",
-          "queryTimeoutMs": 12000,
-          "curateTimeoutMs": 60000
+          "recallLimit": 5
         }
       }
     }
@@ -105,91 +99,71 @@ ByteRover is configured through `plugins.entries.byterover.config` in your OpenC
 }
 ```
 
-### Options
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `cwd` | `string` | OpenClaw workspace fallback | Project working directory used to resolve the centralized ByteRover context tree when session workspace resolution is unavailable. |
+| `recallLimit` | `number` | `5` | Top-N cap on recall hits. |
+| `recallScript` | `string` | none | Deprecated no-op retained for compatibility with the older script-backed mono prototype. |
+| `recallTimeoutMs` | `number` | none | Deprecated no-op; recall is in-process and this timeout is ignored. |
+| `queryTimeoutMs` | `number` | none | Deprecated no-op legacy alias from the CLI-flavored plugin. |
 
+## How It Works
 
-| Option            | Type     | Default         | Description                                                                                                                                   |
-| ----------------- | -------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `brvPath`         | `string` | `"brv"`         | Path to the brv CLI binary. Defaults to resolving `brv` from `PATH`.                                                                          |
-| `cwd`             | `string` | `process.cwd()` | Working directory for brv commands. Must be a project with `.brv/` initialized.                                                               |
-| `queryTimeoutMs`  | `number` | `12000`         | Timeout in milliseconds for `brv query` calls. The effective assemble deadline is capped at 10,000 ms to stay within the agent ready timeout. |
-| `curateTimeoutMs` | `number` | `60000`         | Timeout in milliseconds for `brv curate` calls.                                                                                               |
+### `assemble`
 
+Before each model call, the engine extracts the latest user query, resolves the
+workspace's ByteRover context tree, searches it through `@byterover/core`, and
+injects matching topic HTML inside `<byterover-context>`.
 
-## How it works
+The same system-prompt addition always includes `<byterover-curate-guidance>`.
+That guidance tells the agent to call `brv_record` only for durable memory,
+matching the v4 skill state in `byterover-mono`.
 
-ByteRover hooks into three points in the OpenClaw context engine lifecycle:
+### `brv_record`
 
-### `afterTurn` — curate conversation knowledge
+The plugin registers a first-class agent tool named `brv_record`. The agent
+authors one `<bv-topic>` HTML document and passes it to the tool with a
+slash-separated topic path. The tool writes through `@byterover/core` in-process.
 
-After each conversation turn completes, the plugin:
+### `ingest`
 
-1. Extracts new messages from the turn (skipping pre-prompt messages)
-2. Strips OpenClaw metadata (sender info, timestamps, tool results) to get clean text
-3. Serializes messages with sender attribution
-4. Sends the text to `brv curate --detach` for asynchronous knowledge extraction
+`ingest` is intentionally a no-op. Mono recording is explicit through
+`brv_record`; the plugin does not batch-curate every turn.
 
-Curation runs in detached mode — the brv daemon queues the work and the CLI returns immediately, so it never blocks the conversation.
+### `compact`
 
-### `assemble` — retrieve relevant context
-
-Before each prompt is sent to the LLM, the plugin:
-
-1. Takes the current user message (or falls back to scanning message history)
-2. Strips metadata and skips trivially short queries (< 5 chars)
-3. Runs `brv query` with a 10-second deadline
-4. Wraps the result in a `<byterover-context>` block and injects it as a system prompt addition
-
-If the query times out or fails, the conversation proceeds without context — it's always best-effort.
-
-### `compact` — delegated to runtime
-
-ByteRover does not own compaction. The plugin sets `ownsCompaction: false`, so OpenClaw's built-in sliding-window compaction handles context window management as usual.
-
-### `ingest` — no-op
-
-Ingestion is handled by `afterTurn` in batch (all new messages from the turn at once), so the per-message `ingest` hook is a no-op.
+ByteRover does not own compaction. `ownsCompaction` is `false`, so the runtime
+keeps its normal compaction behavior.
 
 ## Development
 
 ```bash
-# Install dependencies
 npm install
-
-# Type check runtime code (tests are checked by vitest)
 npm run typecheck
-
-# Run tests
 npm test
-
-# Build runtime output (required before linking)
 npm run build
-
-# Link for local testing with OpenClaw
-openclaw plugins install --link .
-openclaw config set plugins.slots.contextEngine byterover
 ```
 
-### Testing locally
+Tests resolve `@byterover/core` from the sibling mono checkout's built dist:
 
-1. Initialize a brv project: `cd /your/project && brv init`
-2. Link the plugin and configure as shown in [Quick start](#quick-start)
-3. Restart OpenClaw
-4. Send a few messages — check gateway logs for:
-  - `[byterover] Plugin loaded` — plugin registered
-  - `afterTurn curating N new messages` — curation running
-  - `assemble injecting systemPromptAddition` — context being retrieved and injected
-
-## Project structure
-
+```bash
+../byterover-mono/packages/core/dist/index.js
 ```
-index.ts                    # Plugin entry point and registration
-openclaw.plugin.json        # Plugin manifest (id, kind, config schema)
-src/
-  context-engine.ts         # ByteRoverContextEngine — implements ContextEngine
-  brv-process.ts            # brv CLI spawning (query, curate) with timeout/abort
-  message-utils.ts          # Metadata stripping and message text extraction
-  types.ts                  # Standalone type definitions (structurally compatible with openclaw/plugin-sdk)
+
+Override that with `BYTEROVER_MONO_CORE_DIST` when needed.
+
+## Project Structure
+
+```text
+index.ts                    # Plugin entry point and tool registration
+build.mjs                   # esbuild bundle with @byterover/core inlined
+openclaw.plugin.json        # Plugin manifest and config schema
+src/context-engine.ts       # ContextEngine implementation
+src/curate-guidance.ts      # v4-aligned curation guidance block
+src/recall.ts               # In-process recall
+src/record.ts               # brv_record tool and in-process write path
+src/message-utils.ts        # Query/content extraction helpers
+src/types.ts                # OpenClaw-compatible local types
 ```
 
 ## License
