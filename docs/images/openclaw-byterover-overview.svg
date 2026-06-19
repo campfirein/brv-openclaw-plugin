@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Placeholder: OpenClaw and ByteRover overview</title>
+  <desc id="desc">Replace this placeholder with an overview diagram.</desc>
+  <rect width="1280" height="720" fill="#f7f8fb"/>
+  <rect x="64" y="64" width="1152" height="592" rx="24" fill="#ffffff" stroke="#c8d0dc" stroke-width="4"/>
+  <text x="640" y="154" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700" fill="#1f2937">IMAGE PLACEHOLDER</text>
+  <text x="640" y="214" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="28" fill="#4b5563">OpenClaw + ByteRover overview diagram</text>
+  <rect x="180" y="310" width="300" height="150" rx="14" fill="#e5efff" stroke="#7aa2e3" stroke-width="3"/>
+  <text x="330" y="395" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="28" fill="#1f2937">OpenClaw</text>
+  <rect x="800" y="310" width="300" height="150" rx="14" fill="#e9f9ef" stroke="#61b47b" stroke-width="3"/>
+  <text x="950" y="395" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="28" fill="#1f2937">ByteRover</text>
+  <line x1="500" y1="385" x2="780" y2="385" stroke="#6b7280" stroke-width="5" stroke-linecap="round"/>
+  <polygon points="780,385 750,368 750,402" fill="#6b7280"/>
+  <text x="640" y="355" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#374151">recall + brv_record</text>
+  <text x="640" y="575" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#6b7280">Replace with final visual.</text>
+</svg>

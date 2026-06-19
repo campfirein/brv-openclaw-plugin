@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Placeholder: Agent record flow</title>
+  <desc id="desc">Replace this placeholder with an agent memory record flow screenshot or diagram.</desc>
+  <rect width="1280" height="720" fill="#f8fafc"/>
+  <rect x="80" y="100" width="260" height="130" rx="16" fill="#eef2ff" stroke="#818cf8" stroke-width="3"/>
+  <text x="210" y="175" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="25" fill="#111827">User asks</text>
+  <rect x="510" y="100" width="260" height="130" rx="16" fill="#ecfeff" stroke="#22d3ee" stroke-width="3"/>
+  <text x="640" y="175" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="25" fill="#111827">Agent works</text>
+  <rect x="940" y="100" width="260" height="130" rx="16" fill="#ecfdf5" stroke="#34d399" stroke-width="3"/>
+  <text x="1070" y="175" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="25" fill="#111827">brv_record</text>
+  <line x1="360" y1="165" x2="490" y2="165" stroke="#64748b" stroke-width="5" stroke-linecap="round"/>
+  <polygon points="490,165 460,148 460,182" fill="#64748b"/>
+  <line x1="790" y1="165" x2="920" y2="165" stroke="#64748b" stroke-width="5" stroke-linecap="round"/>
+  <polygon points="920,165 890,148 890,182" fill="#64748b"/>
+  <text x="640" y="400" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700" fill="#1f2937">IMAGE PLACEHOLDER</text>
+  <text x="640" y="460" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="26" fill="#475569">Replace with final memory-save flow.</text>
+  <text x="640" y="535" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#64748b">Show: no relevant recall -> durable new result -> brv_record.</text>
+</svg>

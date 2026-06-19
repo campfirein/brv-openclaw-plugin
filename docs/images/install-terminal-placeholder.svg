@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Placeholder: Terminal install flow</title>
+  <desc id="desc">Replace this placeholder with terminal installation screenshots.</desc>
+  <rect width="1280" height="720" fill="#111827"/>
+  <rect x="72" y="72" width="1136" height="576" rx="18" fill="#0b1220" stroke="#374151" stroke-width="4"/>
+  <circle cx="116" cy="112" r="12" fill="#ef4444"/>
+  <circle cx="154" cy="112" r="12" fill="#f59e0b"/>
+  <circle cx="192" cy="112" r="12" fill="#10b981"/>
+  <text x="96" y="190" font-family="Menlo, Consolas, monospace" font-size="30" fill="#d1d5db">$ npm install -g openclaw@latest</text>
+  <text x="96" y="250" font-family="Menlo, Consolas, monospace" font-size="30" fill="#d1d5db">$ openclaw plugins install @byterover/byterover</text>
+  <text x="96" y="310" font-family="Menlo, Consolas, monospace" font-size="30" fill="#d1d5db">$ openclaw config set plugins.slots.contextEngine byterover</text>
+  <text x="96" y="370" font-family="Menlo, Consolas, monospace" font-size="30" fill="#d1d5db">$ openclaw gateway restart</text>
+  <text x="640" y="520" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="38" font-weight="700" fill="#ffffff">IMAGE PLACEHOLDER</text>
+  <text x="640" y="570" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="24" fill="#9ca3af">Replace with terminal install screenshot.</text>
+</svg>

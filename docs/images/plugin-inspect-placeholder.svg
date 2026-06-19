@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Placeholder: Plugin inspect output</title>
+  <desc id="desc">Replace this placeholder with OpenClaw plugin inspect output.</desc>
+  <rect width="1280" height="720" fill="#f9fafb"/>
+  <rect x="90" y="70" width="1100" height="580" rx="18" fill="#ffffff" stroke="#d1d5db" stroke-width="4"/>
+  <text x="130" y="140" font-family="Menlo, Consolas, monospace" font-size="28" fill="#111827">ByteRover</text>
+  <text x="130" y="195" font-family="Menlo, Consolas, monospace" font-size="24" fill="#374151">id: byterover</text>
+  <text x="130" y="250" font-family="Menlo, Consolas, monospace" font-size="24" fill="#374151">Status: loaded</text>
+  <text x="130" y="305" font-family="Menlo, Consolas, monospace" font-size="24" fill="#374151">Source: /path/to/brv-openclaw-plugin/dist/index.js</text>
+  <text x="130" y="360" font-family="Menlo, Consolas, monospace" font-size="24" fill="#374151">Version: 3.0.0-mono.0</text>
+  <text x="640" y="505" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="38" font-weight="700" fill="#1f2937">IMAGE PLACEHOLDER</text>
+  <text x="640" y="555" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="24" fill="#6b7280">Replace with plugin inspect screenshot.</text>
+</svg>
