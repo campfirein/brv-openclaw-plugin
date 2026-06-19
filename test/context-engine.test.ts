@@ -17,16 +17,18 @@ function makeLogger(): PluginLogger {
 }
 
 // ---------------------------------------------------------------------------
-// ByteRoverContextEngine — lifecycle shape (no real subprocess; recallScript
-// is pinned to a non-existent path so spawnRecall returns empty fast.)
+// ByteRoverContextEngine — lifecycle shape. Deprecated recallScript config is
+// accepted for compatibility but ignored by the mono implementation.
 // ---------------------------------------------------------------------------
 
-const NO_RECALL = { recallScript: "/tmp/byterover-test-no-such-recall.mjs" };
+const DEPRECATED_SCRIPT_CONFIG = {
+  recallScript: "/tmp/byterover-test-no-such-recall.mjs",
+};
 
 describe("ByteRoverContextEngine", () => {
   it("has correct info fields", () => {
     const engine = new ByteRoverContextEngine(
-      { cwd: "/tmp/test", ...NO_RECALL },
+      { cwd: "/tmp/test", ...DEPRECATED_SCRIPT_CONFIG },
       makeLogger(),
     );
     expect(engine.info.id).toBe("byterover");
@@ -37,7 +39,7 @@ describe("ByteRoverContextEngine", () => {
 
   it("ingest is a no-op (no afterTurn auto-curate in mono)", async () => {
     const engine = new ByteRoverContextEngine(
-      { cwd: "/tmp/test", ...NO_RECALL },
+      { cwd: "/tmp/test", ...DEPRECATED_SCRIPT_CONFIG },
       makeLogger(),
     );
     const result = await engine.ingest({
@@ -49,7 +51,7 @@ describe("ByteRoverContextEngine", () => {
 
   it("compact returns not-compacted", async () => {
     const engine = new ByteRoverContextEngine(
-      { cwd: "/tmp/test", ...NO_RECALL },
+      { cwd: "/tmp/test", ...DEPRECATED_SCRIPT_CONFIG },
       makeLogger(),
     );
     const result = await engine.compact({
@@ -62,7 +64,7 @@ describe("ByteRoverContextEngine", () => {
 
   it("dispose is a no-op (no daemon, no bridge)", async () => {
     const engine = new ByteRoverContextEngine(
-      { cwd: "/tmp/test", ...NO_RECALL },
+      { cwd: "/tmp/test", ...DEPRECATED_SCRIPT_CONFIG },
       makeLogger(),
     );
     await expect(engine.dispose()).resolves.toBeUndefined();
@@ -70,7 +72,7 @@ describe("ByteRoverContextEngine", () => {
 
   it("assemble emits curate guidance even when no query is available", async () => {
     const engine = new ByteRoverContextEngine(
-      { cwd: "/tmp/test", ...NO_RECALL },
+      { cwd: "/tmp/test", ...DEPRECATED_SCRIPT_CONFIG },
       makeLogger(),
     );
     const messages = [{ role: "assistant", content: "hello" }] as unknown[];
@@ -81,13 +83,22 @@ describe("ByteRoverContextEngine", () => {
     // agent always knows how to record. No retrieved content here (no query).
     expect(result.systemPromptAddition).toBeDefined();
     expect(result.systemPromptAddition).toContain("byterover-curate-guidance");
+    expect(result.systemPromptAddition).toContain("record only knowledge");
+    expect(result.systemPromptAddition).toContain("General explanations");
+    expect(result.systemPromptAddition).toContain("Language and sensitivity");
+    expect(result.systemPromptAddition).toContain("Regex patterns");
+    expect(result.systemPromptAddition).toContain('disclosure="public"');
+    expect(result.systemPromptAddition).toContain("Regex patterns only");
+    expect(result.systemPromptAddition).toContain("ByteRover knowledge gap");
+    expect(result.systemPromptAddition).toContain("Unrelated retrieved context");
+    expect(result.systemPromptAddition).not.toContain("Curating every turn");
     expect(result.systemPromptAddition).not.toContain("# Project knowledge retrieved from ByteRover");
   });
 
   it("assemble skips recall for trivially short prompts but still emits guidance", async () => {
     const logger = makeLogger();
     const engine = new ByteRoverContextEngine(
-      { cwd: "/tmp/test", ...NO_RECALL },
+      { cwd: "/tmp/test", ...DEPRECATED_SCRIPT_CONFIG },
       logger,
     );
     const messages = [{ role: "user", content: "ok" }] as unknown[];
@@ -100,7 +111,7 @@ describe("ByteRoverContextEngine", () => {
   it("assemble strips user metadata before measuring query length", async () => {
     const logger = makeLogger();
     const engine = new ByteRoverContextEngine(
-      { cwd: "/tmp/test", ...NO_RECALL },
+      { cwd: "/tmp/test", ...DEPRECATED_SCRIPT_CONFIG },
       logger,
     );
     const prompt = [

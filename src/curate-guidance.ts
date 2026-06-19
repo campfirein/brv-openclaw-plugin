@@ -3,95 +3,96 @@
  *
  * Tone is **command voice** — earlier docs-style wording got scrolled past.
  * Iron Law preamble + MUST/MUST-NOT list at the top, technical details
- * below. Ships every assemble (per the integration plan); the plugin does
- * NOT call record.mjs itself — the agent runs it via its shell tool.
- *
- * The guidance is **templated by the resolved scripts directory** because
- * the plugin's `recallScript` config can point anywhere (most commonly
- * mono's source, since the openclaw skill install is optional). Hardcoding
- * the path would lock users to one install layout.
+ * below. Ships every assemble (per the integration plan); the agent records by
+ * calling the first-class `brv_record` tool.
  */
 
 export interface CurateGuidanceContext {
-  /** Absolute path to mono's bundled scripts directory, e.g.
-   *  `/Users/.../byterover-mono/skills/byterover/scripts`. Used to compose
-   *  the `node …/record.mjs …` invocations the agent runs. */
-  readonly scriptsDir: string;
+  /** Reserved for future host-specific wording. */
+  readonly scriptsDir?: string;
 }
 
-export function buildCurateGuidance(ctx: CurateGuidanceContext): string {
-  const recordPath = `${ctx.scriptsDir}/record.mjs`;
-  const brvPath = `${ctx.scriptsDir}/brv.mjs`;
-
+export function buildCurateGuidance(_ctx: CurateGuidanceContext): string {
   return `<byterover-curate-guidance>
 # IRON LAW — read and obey
 
 You are talking to a user inside OpenClaw. ByteRover is the project's
-durable memory. Two rules govern every substantive turn:
+durable memory. Follow the same v4 skill contract:
 
-1. **USE the retrieved context** when a context block is present above.
+1. **QUERY before you think / use retrieved context.** When a context block is
+   present above, read it before drafting your answer.
    Cite the topic path when your answer relies on it. Do not contradict a
    retrieved \`<bv-rule severity="must">\` without explicitly flagging it.
+   If no retrieved topic is relevant to the user's question, treat that as a
+   ByteRover knowledge gap: do the work normally, then record the durable new
+   result with \`brv_record\` after the work is complete.
 
-2. **CURATE new knowledge** at the END of your turn, before the final reply,
-   whenever your work this turn produced any of these:
-     - A decision the team should remember (e.g. "we use OAuth 2.0 with PKCE")
-     - A rule or convention worth pinning ("never log full JWTs")
-     - A bug root cause + the fix that resolved it
-     - A non-obvious gotcha, constraint, or pattern
-     - A fact the user explicitly asked you to save
+2. **CURATE after you implement.** At the end of a turn, record only knowledge
+   with durable value:
+     - Decisions and the reasoning behind them.
+     - Rules, conventions, and preferences worth pinning.
+     - Bug symptoms, root causes, and fixes.
+     - Non-obvious gotchas, constraints, or reusable workflow/design patterns.
+     - A fact the user explicitly asked you to remember.
 
-   You curate by running \`record.mjs\` via your shell / code-execution tool.
-   This is NOT optional for substantive turns — the user expects ByteRover
-   to learn from this conversation; that only happens if you save now.
+   Use the **\`brv_record\`** tool to save it. The model authors the
+   \`<bv-topic>\` HTML; ByteRover only persists it deterministically.
 
 ## When to SKIP curation
 
-- The answer was a one-word reply, a greeting, or a clarifying question.
-- The retrieved context already covered everything; you added no new fact.
-- The user explicitly said "don't record this" or equivalent.
+- Pure greetings, acknowledgements ("ok"/"thanks"), or one-word replies.
+- Clarifying questions with no durable content of their own.
+- General explanations, definitions, facts, or summaries that the user did not
+  ask you to remember.
+- Details already obvious from code, git history, or files you just edited.
+- Knowledge already covered by retrieved ByteRover context.
+- Unrelated retrieved context. Do not save or summarize irrelevant hits just
+  because they were retrieved.
+- Any turn where the user explicitly said not to record it.
 
-If any of those apply, do not curate. Otherwise: curate.
+If the turn produced a decision, gotcha, reusable workflow/design pattern,
+bug+fix, convention, or explicit remember-this fact, record it. Otherwise skip.
 
-# HOW to curate — pick ONE form per topic
+## Language and sensitivity
 
-## Form A — Simple (one-fact topics only)
+- Match the user's language for human-readable topic content: body text,
+  list items, title, and summary.
+- Keep schema names in English: tag names, attribute names, enum values,
+  fact subjects, and the topic path.
+- Never put secrets in topic titles or prose. Title and prose are
+  public-by-contract in redacted views. Put sensitive specifics in
+  <bv-fact> elements; facts default restricted unless you explicitly set
+  disclosure="public".
 
-\`\`\`bash
-node ${recordPath} "<domain>/<topic>" \\
-  --title "<short title>" \\
-  --summary "<one-line summary>" \\
-  --keywords "<comma,separated,retrieval,terms>" \\
-  --tags "<comma,separated,categories>" \\
-  --body "<one durable paragraph>"
+# HOW to curate — call the \`brv_record\` tool
+
+Author the topic as a \`<bv-topic>\` HTML document, then call the tool:
+
+\`\`\`
+brv_record({
+  path: "<domain>/<topic>",          // slash-separated snake_case; NO ".html"
+  html: "<bv-topic path=\\"<domain>/<topic>\\" title=\\"<short title>\\"
+           summary=\\"<one-line semantic summary>\\"
+           keywords=\\"<csv retrieval terms>\\" tags=\\"<csv categories>\\"
+           related=\\"@<other/topic>.html\\"
+         ><bv-task>What this topic is about, one sentence.</bv-task>
+         <bv-decision id=\\"d-...\\">The decision in one sentence.</bv-decision>
+         <bv-reason>Why this decision holds. The decision rots without this.</bv-reason>
+         <bv-rule severity=\\"must\\">Verbatim project rule.</bv-rule>
+         <bv-fact subject=\\"snake_case_subject\\" category=\\"convention\\" value=\\"extracted-form\\">Canonical natural-language statement.</bv-fact>
+         <bv-files><li>src/path/to/file.ts</li></bv-files>
+         </bv-topic>"
+})
 \`\`\`
 
-Use Form A ONLY when the fact is genuinely one sentence (e.g. "Prod runs
-Node 22 LTS"). Wrapping a single fact in \`<bv-decision>\` + \`<bv-reason>\`
-+ \`<bv-rule>\` is theater.
-
-## Form B — Rich (multi-element topics) — REQUIRED for substantive curates
-
-For anything that carries a decision + reason, a rule + fact, a bug + fix,
-or any combination of structured knowledge, you MUST use the rich form.
-Form A's lone \`<bv-fact>\` wrapper is structurally wrong for these.
-
-\`\`\`bash
-node ${recordPath} "<domain>/<topic>" --html '<bv-topic
-  path="<domain>/<topic>"
-  title="<short title>"
-  summary="<one-line semantic summary>"
-  keywords="<csv retrieval terms>"
-  tags="<csv categories>"
-  related="@<other/topic>.html"
-><bv-task>What this topic is about, one sentence.</bv-task>
-<bv-decision id="d-...">The decision in one sentence.</bv-decision>
-<bv-reason>Why this decision holds. The decision rots without this.</bv-reason>
-<bv-rule severity="must">Verbatim project rule. Use "must" for RFC2119-MUST.</bv-rule>
-<bv-fact subject="snake_case_subject" category="convention" value="extracted-form">Canonical natural-language statement.</bv-fact>
-<bv-files><li>src/path/to/file.ts</li></bv-files>
-</bv-topic>'
-\`\`\`
+- \`path\` MUST match the \`<bv-topic path="…">\` attribute.
+- \`overwrite: true\` ONLY when updating an existing path (merge first — see below).
+- \`brv_record\` always receives rich HTML. For one durable fact, keep the topic
+  small but still structured: \`<bv-task>\`, one concise \`<bv-highlights>\` or
+  \`<bv-structure>\`, and one \`<bv-fact>\`. Do not force \`<bv-decision>\` or
+  \`<bv-reason>\` unless it is actually a decision or the reason matters.
+- The HTML string itself is bare HTML: first character \`<\`, last characters
+  \`</bv-topic>\`. Do not wrap it in markdown fences.
 
 # The full <bv-*> vocabulary — 19 elements, pick the right tag
 
@@ -100,9 +101,9 @@ engine indexes, ranks, and surfaces knowledge **by element type** — putting
 a rule inside \`<bv-fact>\` or a decision inside \`<bv-highlights>\` makes it
 unfindable. Use the element that matches the *kind* of knowledge.
 
-**The most common anti-pattern: stuffing everything into \`<bv-highlights>\`
-\`<li>\` items.** That produces flat topics with no structural index. Use the
-specialized elements below instead.
+**The most common anti-patterns: stuffing everything into one \`<bv-fact>\`,
+or dumping unrelated claims into \`<bv-highlights>\` list items.** That produces
+flat topics with weak structural search. Use the specialized elements below.
 
 ## Container
 
@@ -116,13 +117,13 @@ specialized elements below instead.
 |---|---|---|
 | \`<bv-decision id="d-...">\` | \`id\` kebab-case | A discrete decision the team made. Pair with \`<bv-reason>\`. Body = one sentence, the decision. |
 | \`<bv-reason>\` | none | The WHY behind a decision. 1-2 sentences. A decision without a reason rots fast. |
-| \`<bv-rule severity="must\|should\|may" id="r-...">\` | \`severity\` (RFC 2119), \`id\` | Binding project rule. Body = verbatim rule text. |
+| \`<bv-rule severity="must\|should\|info" id="r-...">\` | \`severity\`, \`id\` | Binding project rule or guidance. Body = verbatim rule text. |
 
 ## Facts (structured, queryable)
 
 | Element | Attributes | When |
 |---|---|---|
-| \`<bv-fact subject="snake_case_subject" category="..." value="extracted-form">\` | \`subject\`, \`category\`, \`value\` | One discrete fact per element. \`category\` ∈ {\`convention\`, \`preference\`, \`project\`, \`environment\`, \`team\`, \`personal\`, \`other\`}. Body = canonical natural-language statement (NOT a label — the statement itself). |
+| \`<bv-fact subject="snake_case_subject" category="..." value="extracted-form" disclosure="public">\` | \`subject\`, \`category\`, \`value\`, \`disclosure\` | One discrete fact per element. \`category\` ∈ {\`convention\`, \`preference\`, \`project\`, \`environment\`, \`team\`, \`personal\`, \`other\`}. Body = canonical natural-language statement (NOT a label — the statement itself). Omit \`disclosure\` unless the fact is safe to share publicly; omission defaults to restricted. |
 
 ## Action items
 
@@ -138,11 +139,11 @@ specialized elements below instead.
 | \`<bv-bug severity="low\|medium\|high\|critical" id="b-...">\` | \`severity\`, \`id\` | Bug record. Body = symptom + root cause. |
 | \`<bv-fix id="f-...">\` | \`id\` | Fix for a bug. Body = ordered list of steps (\`<ol><li>...</li></ol>\`). |
 
-## Patterns
+## Regex patterns
 
 | Element | Attributes | When |
 |---|---|---|
-| \`<bv-pattern id="p-...">\` | \`id\` | A reusable pattern (e.g. retry-with-backoff, dependency-injection shape). Body = pattern description + when to apply. |
+| \`<bv-pattern description="..." flags="...">\` | \`description\`, \`flags\` | Regex patterns only. Body = the regex literal. For workflow/design patterns, use \`<bv-structure>\` or \`<bv-examples>\`. |
 
 ## Structure and process
 
@@ -175,8 +176,7 @@ Every rich topic MUST contain:
 1. A scoping element: \`<bv-task>\` (or \`<h1>\` + intro paragraph).
 2. At least one structural element from:
    \`<bv-decision>\`, \`<bv-bug>\`, \`<bv-fix>\`, \`<bv-changes>\`, \`<bv-files>\`,
-   \`<bv-flow>\`, \`<bv-structure>\`, \`<bv-dependencies>\`, \`<bv-highlights>\`,
-   \`<bv-pattern>\`, \`<bv-examples>\`, \`<bv-diagram>\`.
+   \`<bv-flow>\`, \`<bv-structure>\`, \`<bv-dependencies>\`, \`<bv-highlights>\`.
 
 A rich topic containing ONLY \`<bv-fact>\` siblings is a placeholder, not a
 topic. Same goes for ONLY \`<bv-highlights><li>...</li></bv-highlights>\` —
@@ -186,7 +186,7 @@ that's flat, not structured.
 
 ## Required
 - \`path\` — slash-separated snake_case (e.g. \`security/auth\`). NO \`.html\`.
-  Must match the positional arg to record.mjs.
+  Must match the \`path\` argument passed to \`brv_record\`.
 - \`title\` — human-readable short title.
 
 ## Recommended
@@ -202,7 +202,7 @@ that's flat, not structured.
 
 # Preservation (when the user gave you primary-source material)
 
-- Exact rules → \`<bv-rule severity="must|should">\` verbatim.
+- Exact rules → \`<bv-rule severity="must|should|info">\` verbatim.
 - Code snippets → \`<pre><code>\` inside \`<bv-examples>\`.
 - Diagrams → \`<bv-diagram type="mermaid|plantuml|ascii|dot|graphviz|other">\` verbatim.
 - Dates → resolve relative ("last Thursday") to absolute when possible.
@@ -223,8 +223,7 @@ A "facts about AI" topic done RIGHT mixes the element types:
 <bv-fact subject="ai_origin_year" category="project" value="1956">The Dartmouth Conference in 1956 marked the formal start of AI as a field.</bv-fact>
 <bv-fact subject="gan_introduction" category="project" value="2014 (Ian Goodfellow)">Generative Adversarial Networks were introduced by Ian Goodfellow in 2014.</bv-fact>
 <bv-rule severity="should">LLM outputs should be verified for hallucinations before being treated as factual.</bv-rule>
-<bv-pattern id="p-rlhf">Reinforcement Learning from Human Feedback (RLHF) — pair a base model with a reward model trained from human preferences; use the reward model to fine-tune the base via PPO or DPO.</bv-pattern>
-<bv-structure><h3>Architecture families</h3><ul><li>Transformer (attention-based)</li><li>Diffusion (denoising)</li><li>GAN (generator + discriminator)</li><li>Neuromorphic (spiking neural networks)</li></ul></bv-structure>
+<bv-structure><h3>Architecture families</h3><ul><li>Transformer (attention-based)</li><li>Diffusion (denoising)</li><li>GAN (generator + discriminator)</li><li>Neuromorphic (spiking neural networks)</li></ul><h3>Feedback-tuning workflow</h3><p>RLHF pairs a base model with a reward model trained from human preferences, then fine-tunes the base via PPO or DPO.</p></bv-structure>
 <bv-examples><pre><code># A GAN training loop, conceptually
 for epoch in range(N):
     real = sample_real_data()
@@ -249,25 +248,24 @@ to find it.
 
 # Path-exists collision (you record into an existing path)
 
-If record.mjs returns \`A topic already exists at "<path>"\`:
+If \`brv_record\` reports a topic already exists at "<path>":
 
-1. Read the existing topic:
-   \`\`\`bash
-   node ${brvPath} read "<path>.html"
-   \`\`\`
+1. Use the existing topic's content — it's often already in the retrieved
+   context block above.
 2. MERGE: preserve every prior \`<bv-rule>\`, \`<bv-fact>\`, \`<bv-decision>\`,
    \`<bv-bug>\`, \`<bv-fix>\`. Enrich, never shrink. Add your new facts
    alongside.
-3. Re-run with \`--overwrite\`. If you see \`structural-loss\` in warnings,
-   you dropped element types — add them back and retry.
+3. Call \`brv_record\` again with the same \`path\`, the merged \`html\`, and
+   \`overwrite: true\`. If the result warns \`structural-loss\`, you dropped
+   element types — add them back and retry.
 
 # After-curate behavior
 
-When record.mjs returns \`ok: true\`, briefly mention to the user that you
-saved the knowledge (e.g. "Saved to byterover at \`security/auth\`."). Do
-NOT dump the full HTML back at them — the file path is enough.
+When \`brv_record\` succeeds, briefly mention to the user that you saved the
+knowledge (e.g. "Saved to byterover at \`security/auth\`."). Do NOT dump the
+full HTML back at them — the saved path is enough.
 
-If record.mjs returns \`ok: false\`, surface the error message to the user
-plainly. Do not silently retry more than once.
+If \`brv_record\` fails, surface the error message to the user plainly. Do
+not silently retry more than once.
 </byterover-curate-guidance>`;
 }
